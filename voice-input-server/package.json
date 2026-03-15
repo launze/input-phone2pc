@@ -1,0 +1,13 @@
+{
+  "name": "voice-input-server",
+  "version": "1.0.0",
+  "description": "语音输入中转服务器",
+  "type": "module",
+  "scripts": {
+    "dev": "cargo watch -q -c -w src/ -x run",
+    "build": "cargo build --release",
+    "start": "cargo run --release"
+  },
+  "devDependencies": {},
+  "dependencies": {}
+}

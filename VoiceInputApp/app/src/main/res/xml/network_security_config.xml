@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<network-security-config>
+    <!-- Android 9+ 需要明确允许明文连接 -->
+    <base-config cleartextTrafficPermitted="true">
+        <trust-anchors>
+            <certificates src="system" />
+            <certificates src="user" />
+        </trust-anchors>
+    </base-config>
+    
+    <!-- 针对自签名证书的域名配置 -->
+    <domain-config>
+        <domain includeSubdomains="true">nas.smarthome2020.top</domain>
+        <trust-anchors>
+            <certificates src="@raw/server_cert" />
+            <certificates src="system" />
+        </trust-anchors>
+    </domain-config>
+
+    <!-- 本地网络允许明文 -->
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="true">127.0.0.1</domain>
+        <domain includeSubdomains="true">localhost</domain>
+        <domain includeSubdomains="true">192.168.0.0</domain>
+        <domain includeSubdomains="true">10.0.0.0</domain>
+    </domain-config>
+</network-security-config>

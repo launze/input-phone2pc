@@ -1,0 +1,27 @@
+[package]
+name = "voice-input-server"
+version = "1.0.0"
+description = "语音输入中转服务器"
+authors = ["Voice Input Team"]
+edition = "2021"
+
+[dependencies]
+tokio = { version = "1.40", features = ["full"] }
+tokio-tungstenite = "0.21"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+uuid = { version = "1.10", features = ["v4", "serde"] }
+chrono = { version = "0.4", features = ["serde"] }
+futures-util = "0.3"
+dashmap = "5.5"
+tracing = "0.1"
+tracing-subscriber = "0.3"
+anyhow = "1.0"
+aes-gcm = "0.10"
+rand = "0.8"
+hex = "0.4"
+rustls = "0.21"
+tokio-rustls = "0.24"
+rustls-pemfile = "1.0"
+rusqlite = { version = "0.31", features = ["bundled"] }
+

@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>语音输入助手</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="container">
+        <!-- 顶部工具栏 -->
+        <div class="toolbar">
+            <div class="toolbar-left">
+                <span class="app-title">🎤 语音输入助手</span>
+                <div class="toolbar-divider"></div>
+                <!-- 服务器模式 -->
+                <div class="toolbar-item">
+                    <label class="switch">
+                        <input type="checkbox" id="server-mode-toggle">
+                        <span class="slider"></span>
+                    </label>
+                    <span class="toolbar-label">服务器</span>
+                    <span class="server-dot" id="server-dot"></span>
+                    <button id="edit-url-btn" class="toolbar-btn" title="编辑服务器地址">✏️</button>
+                </div>
+                <div class="toolbar-divider"></div>
+                <!-- 网络信息 -->
+                <div class="toolbar-item network-info">
+                    <span class="net-badge">UDP:58888</span>
+                    <span class="net-badge">TCP:58889</span>
+                </div>
+            </div>
+            <div class="toolbar-right">
+                <!-- 设备连接状态 -->
+                <div class="device-status" id="device-status">
+                    <span class="status-indicator" id="status-indicator"></span>
+                    <span id="status-text">等待连接</span>
+                    <span id="device-name" style="display:none;"></span>
+                    <button id="unpair-btn" class="toolbar-btn unpair-btn" style="display:none;" title="取消配对">✕</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- 服务器地址编辑栏（默认隐藏） -->
+        <div id="url-bar" class="url-bar" style="display:none;">
+            <label>服务器地址:</label>
+            <input type="text" id="server-url" placeholder="wss://your-server:7070">
+            <span class="url-hint">按回车连接</span>
+        </div>
+
+        <!-- 主内容区 -->
+        <div class="main-content">
+            <!-- 配对引导区（未配对时显示） -->
+            <div id="pairing-section" class="pairing-section">
+                <div class="pairing-layout">
+                    <!-- 二维码 -->
+                    <div class="qr-area" id="qr-area" style="display:none;">
+                        <img id="qr-code-img" alt="配对二维码" />
+                        <button id="refresh-qr-btn" class="btn-small">刷新二维码</button>
+                    </div>
+                    <!-- 使用说明 -->
+                    <div class="guide-area">
+                        <h2>快速开始</h2>
+                        <div class="steps">
+                            <div class="step">
+                                <span class="step-num">1</span>
+                                <span>打开顶部服务器开关，等待连接成功（绿色圆点）</span>
+                            </div>
+                            <div class="step">
+                                <span class="step-num">2</span>
+                                <span>用手机 App 扫描左侧二维码完成配对</span>
+                            </div>
+                            <div class="step">
+                                <span class="step-num">3</span>
+                                <span>在手机上输入或语音输入文字，电脑自动接收</span>
+                            </div>
+                        </div>
+                        <p class="guide-note">支持局域网直连和服务器中转两种模式</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 历史记录区（配对后显示） -->
+            <div id="history-section" class="history-section" style="display:none;">
+                <div class="history-header">
+                    <span>📝 接收记录</span>
+                    <button id="clear-history-btn" class="btn-small">清空</button>
+                </div>
+                <div id="history-list" class="history-list">
+                    <div class="history-empty" id="history-empty">等待手机发送文字...</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="main.js"></script>
+</body>
+</html>
