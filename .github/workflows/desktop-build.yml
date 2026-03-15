@@ -1,0 +1,39 @@
+name: Desktop Build
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [windows-latest, ubuntu-latest, macos-latest]
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '18'
+
+    - name: Install dependencies
+      run: |
+        cd voice-input-desktop
+        npm install
+
+    - name: Build desktop app
+      run: |
+        cd voice-input-desktop
+        npm run build
+
+    - name: Upload artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: voice-input-desktop-${{ matrix.os }}
+        path: voice-input-desktop/src-tauri/target/release/bundle/
