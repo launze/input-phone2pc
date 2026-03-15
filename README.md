@@ -120,8 +120,6 @@ cargo build --release
 - **WebSocket**（端口 7070）- 消息中转
 - **消息类型**: 注册、配对、中转、通知转发
 
-详见 [PROTOCOL.md](PROTOCOL.md) 和 [SERVER_DESIGN.md](SERVER_DESIGN.md)
-
 ## 部署架构
 
 ### 局域网直连
@@ -178,14 +176,6 @@ cargo build --release
 ## 文档
 
 - [README.md](README.md) - 项目介绍（本文件）
-- [PROTOCOL.md](PROTOCOL.md) - 网络协议规范
-- [SERVER_DESIGN.md](SERVER_DESIGN.md) - 服务器架构设计
-- [SERVER_FEATURES.md](SERVER_FEATURES.md) - 服务器功能说明
-- [USER_GUIDE.md](USER_GUIDE.md) - 用户使用指南
-- [BUILD.md](BUILD.md) - 构建和发布指南
-- [TESTING.md](TESTING.md) - 跨平台测试指南
-- [PROJECT_SUMMARY.md](PROJECT_SUMMARY.md) - 项目总结
-- [COMPLETION_REPORT.md](COMPLETION_REPORT.md) - 完成报告
 
 ## 性能指标
 
