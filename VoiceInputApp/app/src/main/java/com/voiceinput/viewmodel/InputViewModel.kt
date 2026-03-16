@@ -6,11 +6,13 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.google.gson.Gson
 import com.google.gson.JsonObject
+
 import com.voiceinput.data.ConfigManager
 import com.voiceinput.data.model.Device
 import com.voiceinput.data.model.HistoryItem
 import com.voiceinput.data.model.ServerConfig
 import com.voiceinput.data.model.ServerDeviceInfo
+import com.voiceinput.data.repository.HistoryRepository
 import com.voiceinput.network.NetworkManager
 import com.voiceinput.network.ServerConnection
 import kotlinx.coroutines.Job
@@ -28,6 +30,7 @@ class InputViewModel(application: Application) : AndroidViewModel(application) {
 
     private val gson = Gson()
     private val configManager = ConfigManager(application.applicationContext)
+    private val historyRepository = HistoryRepository(application.applicationContext)
     private val networkManager = NetworkManager()
     private val serverConnection = ServerConnection(application.applicationContext)
 
@@ -74,6 +77,12 @@ class InputViewModel(application: Application) : AndroidViewModel(application) {
 
     init {
         refreshPairedDevices()
+        
+        // 加载历史记录
+        viewModelScope.launch {
+            val savedHistory = historyRepository.loadHistory()
+            _historyItems.value = savedHistory
+        }
 
         serverConnection.onRelayMessageReceived = { fromDeviceId, payload ->
             Log.d(TAG, "Relay message from $fromDeviceId: $payload")
@@ -256,6 +265,51 @@ class InputViewModel(application: Application) : AndroidViewModel(application) {
                 localPort = localPort
             )
 
+            // 检查服务器中转开关状态
+            val serverModeEnabled = configManager.isServerModeEnabled()
+            
+            // 如果服务器中转已启用，直接使用服务器中转，不尝试局域网
+            if (serverModeEnabled) {
+                addLog("服务器中转已启用，直接使用服务器中转...")
+                if (serverUrl.isBlank()) {
+                    addLog("无服务器地址")
+                    pendingScannedPair = null
+                    return@launch
+                }
+
+                val currentUrl = configManager.getServerUrl()
+                val shouldReconnect = !serverConnection.isConnected() ||
+                        !currentUrl.equals(serverUrl, ignoreCase = true)
+
+                if (!currentUrl.equals(serverUrl, ignoreCase = true)) {
+                    configManager.saveServerUrl(serverUrl)
+                }
+
+                if (shouldReconnect) {
+                    disconnectFromServer()
+                    delay(300)
+                    connectToServer(serverUrl)
+                    val connected = waitForServerConnected(timeoutMs = 10_000)
+                    if (!connected) {
+                        addLog("服务器连接失败，无法发起配对")
+                        pendingScannedPair = null
+                        return@launch
+                    }
+                }
+
+                if (serverConnection.isConnected()) {
+                    val myDeviceId = configManager.getDeviceId()
+                    val myDeviceName = configManager.getDeviceName()
+                    serverConnection.sendPairRequest(myDeviceId, myDeviceName, deviceId)
+                    addLog("已发送服务器配对请求到 $deviceName")
+                } else {
+                    addLog("服务器连接失败，无法配对")
+                    pendingScannedPair = null
+                }
+                return@launch
+            }
+
+            // 服务器中转未启用，尝试局域网直连
             if (localIp.isNotBlank() && localPort > 0) {
                 addLog("尝试局域网直连 $localIp:$localPort ...")
                 val device = Device(
@@ -363,6 +417,11 @@ class InputViewModel(application: Application) : AndroidViewModel(application) {
         )
         _historyItems.value = _historyItems.value + listOf(historyItem)
         _inputText.value = ""
+        
+        // 保存历史记录
+        viewModelScope.launch {
+            historyRepository.addHistoryItem(historyItem)
+        }
     }
 
     private fun sendTextViaRelay(text: String) {
@@ -378,6 +437,38 @@ class InputViewModel(application: Application) : AndroidViewModel(application) {
 
     fun onHistoryItemClick(item: HistoryItem) {
         _inputText.value = item.text
+    }
+    
+    // 删除单条历史记录
+    fun deleteHistoryItem(itemId: String) {
+        viewModelScope.launch {
+            historyRepository.deleteHistoryItem(itemId)
+            _historyItems.value = _historyItems.value.filter { it.id != itemId }
+        }
+    }
+    
+    // 清空所有历史记录
+    fun clearAllHistory() {
+        viewModelScope.launch {
+            historyRepository.clearHistory()
+            _historyItems.value = emptyList()
+        }
+    }
+    
+    // 搜索历史记录
+    fun searchHistory(query: String) {
+        viewModelScope.launch {
+            val results = historyRepository.searchHistory(query)
+            _historyItems.value = results
+        }
+    }
+    
+    // 重新加载所有历史记录
+    fun reloadHistory() {
+        viewModelScope.launch {
+            val savedHistory = historyRepository.loadHistory()
+            _historyItems.value = savedHistory
+        }
     }
 
     fun connectToServer(serverUrl: String) {
@@ -488,6 +579,7 @@ class InputViewModel(application: Application) : AndroidViewModel(application) {
         return when (val state = serverConnection.connectionState.value) {
             is ServerConnection.ConnectionState.Connected -> "已连接服务器"
             is ServerConnection.ConnectionState.Connecting -> "连接中..."
+            is ServerConnection.ConnectionState.Reconnecting -> "重连中...（第${state.attempt}次）"
             is ServerConnection.ConnectionState.Error -> "错误: ${state.message}"
             is ServerConnection.ConnectionState.Disconnected -> "未连接"
         }

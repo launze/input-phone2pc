@@ -24,7 +24,7 @@ fun QrScannerScreen(
     onBack: () -> Unit
 ) {
     val gson = remember { Gson() }
-    var scanStatus by remember { mutableStateOf("点击下方按钮开始扫描") }
+    var scanStatus by remember { mutableStateOf("正在打开摄像头...") }
     var hasError by remember { mutableStateOf(false) }
 
     val scanLauncher = rememberLauncherForActivityResult(ScanContract()) { result ->
@@ -58,7 +58,20 @@ fun QrScannerScreen(
         } else {
             scanStatus = "扫描已取消"
             hasError = false
+            onBack()
         }
+    }
+
+    // 自动启动扫描
+    LaunchedEffect(Unit) {
+        val options = ScanOptions().apply {
+            setDesiredBarcodeFormats(ScanOptions.QR_CODE)
+            setPrompt("将二维码放入取景框中")
+            setBeepEnabled(false)
+            setOrientationLocked(true)
+            captureActivity = com.journeyapps.barcodescanner.CaptureActivity::class.java
+        }
+        scanLauncher.launch(options)
     }
 
     Scaffold(
@@ -96,33 +109,6 @@ fun QrScannerScreen(
             )
 
             Spacer(modifier = Modifier.height(8.dp))
-
-            Text(
-                text = "打开电脑端应用，连接服务器后会显示配对二维码",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-
-            Spacer(modifier = Modifier.height(32.dp))
-
-            Button(
-                onClick = {
-                    val options = ScanOptions().apply {
-                        setDesiredBarcodeFormats(ScanOptions.QR_CODE)
-                        setPrompt("将二维码放入取景框中")
-                        setBeepEnabled(false)
-                        setOrientationLocked(false)
-                    }
-                    scanLauncher.launch(options)
-                },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(56.dp)
-            ) {
-                Icon(Icons.Default.QrCodeScanner, contentDescription = null)
-                Spacer(modifier = Modifier.width(8.dp))
-                Text("开始扫描", style = MaterialTheme.typography.titleMedium)
-            }
 
             Spacer(modifier = Modifier.height(16.dp))
 
