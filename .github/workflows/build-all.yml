@@ -184,6 +184,15 @@ jobs:
     - name: Install Tauri CLI
       run: npm install -g @tauri-apps/cli@latest
     
+    - name: Ensure Rust target is installed (before build)
+      run: |
+        echo "Current installed targets:"
+        rustup target list --installed
+        echo "Adding target ${{ matrix.rust_target }} if not present..."
+        rustup target add ${{ matrix.rust_target }}
+        echo "Verification after adding:"
+        rustup target list --installed
+    
     - name: Build Tauri App
       working-directory: voice-input-desktop
       env:
