@@ -156,17 +156,6 @@ jobs:
         echo "CXX_aarch64_unknown_linux_gnu=aarch64-linux-gnu-g++" >> $GITHUB_ENV
         echo "CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc" >> $GITHUB_ENV
     
-    - name: Add Rust target
-      shell: bash
-      run: |
-        for i in 1 2 3; do
-          rustup target add ${{ matrix.rust_target }} && break || sleep 10
-        done
-    
-    - name: Verify Rust target installation
-      shell: bash
-      run: rustup target list --installed
-    
     - name: Cache cargo registry
       uses: actions/cache@v4
       with:
@@ -178,6 +167,14 @@ jobs:
       with:
         path: ~/.cargo/git
         key: ${{ runner.os }}-${{ matrix.arch }}-cargo-index-${{ hashFiles('**/Cargo.lock') }}
+    
+    - name: Add Rust target (after cache)
+      shell: bash
+      run: |
+        echo "Installing Rust target: ${{ matrix.rust_target }}"
+        rustup target add ${{ matrix.rust_target }}
+        echo "Installed targets:"
+        rustup target list --installed
     
     - name: Install frontend dependencies
       working-directory: voice-input-desktop
