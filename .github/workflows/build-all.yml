@@ -156,6 +156,9 @@ jobs:
         echo "CXX_aarch64_unknown_linux_gnu=aarch64-linux-gnu-g++" >> $GITHUB_ENV
         echo "CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc" >> $GITHUB_ENV
     
+    - name: Add Rust target
+      run: rustup target add ${{ matrix.rust_target }}
+    
     - name: Cache cargo registry
       uses: actions/cache@v4
       with:
@@ -168,13 +171,11 @@ jobs:
         path: ~/.cargo/git
         key: ${{ runner.os }}-${{ matrix.arch }}-cargo-index-${{ hashFiles('**/Cargo.lock') }}
     
-    - name: Add Rust target (after cache)
-      shell: bash
-      run: |
-        echo "Installing Rust target: ${{ matrix.rust_target }}"
-        rustup target add ${{ matrix.rust_target }}
-        echo "Installed targets:"
-        rustup target list --installed
+    - name: Cache cargo build
+      uses: actions/cache@v4
+      with:
+        path: voice-input-desktop/src-tauri/target
+        key: ${{ runner.os }}-${{ matrix.arch }}-cargo-build-${{ hashFiles('**/Cargo.lock') }}
     
     - name: Install frontend dependencies
       working-directory: voice-input-desktop
@@ -183,26 +184,21 @@ jobs:
     - name: Install Tauri CLI
       run: npm install -g @tauri-apps/cli@latest
     
-    - name: Ensure Rust target is installed (before build)
-      shell: bash
-      run: |
-        echo "Current installed targets:"
-        rustup target list --installed
-        echo "Adding target ${{ matrix.rust_target }} if not present..."
-        rustup target add ${{ matrix.rust_target }}
-        echo "Verification after adding:"
-        rustup target list --installed
-    
-    - name: Build Tauri App
+    - name: Build Tauri App (Windows)
+      if: matrix.os == 'windows'
       working-directory: voice-input-desktop
-      env:
-        RUST_TARGET: ${{ matrix.rust_target }}
-      run: |
-        if [ "${{ matrix.arch }}" = "aarch64" ]; then
-          npm run tauri build -- --target ${{ matrix.rust_target }}
-        else
-          npm run tauri build
-        fi
+      run: npm run tauri build
+    
+    - name: Build Tauri App (macOS/Linux ARM64)
+      if: matrix.os != 'windows' && matrix.arch == 'aarch64'
+      working-directory: voice-input-desktop
+      run: npm run tauri build -- --target ${{ matrix.rust_target }}
+      shell: bash
+    
+    - name: Build Tauri App (macOS/Linux x86_64)
+      if: matrix.os != 'windows' && matrix.arch == 'x86_64'
+      working-directory: voice-input-desktop
+      run: npm run tauri build
       shell: bash
     
     - name: Upload Windows Installer
@@ -220,9 +216,7 @@ jobs:
       uses: actions/upload-artifact@v4
       with:
         name: voice-input-desktop-macos-${{ matrix.arch }}
-        path: |
-          voice-input-desktop/src-tauri/target/${{ matrix.rust_target }}/release/bundle/dmg/*.dmg
-          voice-input-desktop/src-tauri/target/release/bundle/dmg/*.dmg
+        path: voice-input-desktop/src-tauri/target/${{ matrix.rust_target }}/release/bundle/dmg/*.dmg
         if-no-files-found: warn
     
     - name: Upload Linux Packages
@@ -233,8 +227,6 @@ jobs:
         path: |
           voice-input-desktop/src-tauri/target/${{ matrix.rust_target }}/release/bundle/deb/*.deb
           voice-input-desktop/src-tauri/target/${{ matrix.rust_target }}/release/bundle/appimage/*.AppImage
-          voice-input-desktop/src-tauri/target/release/bundle/deb/*.deb
-          voice-input-desktop/src-tauri/target/release/bundle/appimage/*.AppImage
         if-no-files-found: warn
 
   create-release:
