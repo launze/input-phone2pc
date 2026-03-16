@@ -157,12 +157,14 @@ jobs:
         echo "CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc" >> $GITHUB_ENV
     
     - name: Add Rust target
+      shell: bash
       run: |
         for i in 1 2 3; do
           rustup target add ${{ matrix.rust_target }} && break || sleep 10
         done
     
     - name: Verify Rust target installation
+      shell: bash
       run: rustup target list --installed
     
     - name: Cache cargo registry
@@ -185,6 +187,7 @@ jobs:
       run: npm install -g @tauri-apps/cli@latest
     
     - name: Ensure Rust target is installed (before build)
+      shell: bash
       run: |
         echo "Current installed targets:"
         rustup target list --installed
