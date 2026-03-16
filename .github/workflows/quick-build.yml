@@ -1,0 +1,87 @@
+name: Quick Build (Dev)
+
+on:
+  push:
+    branches: [ dev, develop ]
+  pull_request:
+    branches: [ dev, develop ]
+  workflow_dispatch:
+
+jobs:
+  quick-build-server:
+    name: Quick Build Server
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Setup Rust
+      uses: dtolnay/rust-toolchain@stable
+    
+    - name: Build Server
+      working-directory: voice-input-server
+      run: cargo build --release
+    
+    - name: Run tests
+      working-directory: voice-input-server
+      run: cargo test
+
+  quick-build-android:
+    name: Quick Build Android
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Setup JDK 17
+      uses: actions/setup-java@v4
+      with:
+        distribution: 'temurin'
+        java-version: '17'
+        cache: 'gradle'
+    
+    - name: Grant execute permission for gradlew
+      working-directory: VoiceInputApp
+      run: chmod +x gradlew
+    
+    - name: Build Debug APK
+      working-directory: VoiceInputApp
+      run: ./gradlew assembleDebug
+
+  quick-build-desktop:
+    name: Quick Build Desktop
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '20'
+        cache: 'npm'
+        cache-dependency-path: voice-input-desktop/package-lock.json
+    
+    - name: Setup Rust
+      uses: dtolnay/rust-toolchain@stable
+    
+    - name: Install dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y libwebkit2gtk-4.1-dev \
+          build-essential \
+          curl \
+          wget \
+          file \
+          libxdo-dev \
+          libssl-dev \
+          libayatana-appindicator3-dev \
+          librsvg2-dev
+    
+    - name: Install frontend dependencies
+      working-directory: voice-input-desktop
+      run: npm ci
+    
+    - name: Build Tauri App (Debug)
+      working-directory: voice-input-desktop
+      run: npm run tauri build -- --debug
