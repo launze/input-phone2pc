@@ -129,7 +129,6 @@ fun InputScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(paddingValues)
-                .imePadding()
         ) {
             // History list or empty state with scan button
             AnimatedContent(
@@ -138,14 +137,13 @@ fun InputScreen(
                     fadeIn(animationSpec = tween(300)) togetherWith
                             fadeOut(animationSpec = tween(300))
                 },
-                label = "history"
+                label = "history",
+                modifier = Modifier.weight(1f)
             ) { isEmpty ->
                 if (isEmpty) {
                     Box(
                         modifier = Modifier
-                            .weight(1f)
-                            .fillMaxWidth()
-                            .heightIn(min = 100.dp)
+                            .fillMaxSize()
                             .padding(32.dp),
                         contentAlignment = Alignment.Center
                     ) {
@@ -193,10 +191,7 @@ fun InputScreen(
                     }
                 } else {
                     LazyColumn(
-                        modifier = Modifier
-                            .weight(1f)
-                            .fillMaxWidth()
-                            .heightIn(min = 100.dp),
+                        modifier = Modifier.fillMaxSize(),
                         contentPadding = PaddingValues(16.dp),
                         verticalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
@@ -224,7 +219,9 @@ fun InputScreen(
             Surface(
                 shadowElevation = 8.dp,
                 tonalElevation = 2.dp,
-                modifier = Modifier.fillMaxWidth()
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .imePadding()
             ) {
                 InputField(
                     text = inputText,
