@@ -71,3 +71,6 @@ config.json
 *.tmp
 *.temp
 *.bak
+
+# AI config files
+CLAUDE.md
