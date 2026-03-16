@@ -177,6 +177,15 @@ jobs:
         path: voice-input-desktop/src-tauri/target
         key: ${{ runner.os }}-${{ matrix.arch }}-cargo-build-${{ hashFiles('**/Cargo.lock') }}
     
+    - name: Verify Rust target after cache
+      run: |
+        echo "Checking installed targets..."
+        rustup target list --installed
+        echo "Re-adding target to ensure it's available..."
+        rustup target add ${{ matrix.rust_target }}
+        echo "Final verification:"
+        rustup target list --installed
+    
     - name: Install frontend dependencies
       working-directory: voice-input-desktop
       run: npm ci
