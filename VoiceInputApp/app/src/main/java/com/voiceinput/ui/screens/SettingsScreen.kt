@@ -34,7 +34,8 @@ fun SettingsScreen(
 
     // 开启服务器模式时自动连接
     LaunchedEffect(serverModeEnabled) {
-        if (serverModeEnabled && connectionState is ServerConnection.ConnectionState.Disconnected) {
+        if (serverModeEnabled &&
+            connectionState is ServerConnection.ConnectionState.Disconnected) {
             val url = configManager.getServerUrl()
             if (url.isNotBlank()) {
                 viewModel.connectToServer(url)
@@ -71,7 +72,7 @@ fun SettingsScreen(
                     verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
                     Text(
-                        text = "服务器设置",
+                        text = "服务端中转设置",
                         style = MaterialTheme.typography.titleMedium
                     )
 
@@ -85,11 +86,11 @@ fun SettingsScreen(
                     ) {
                         Column(modifier = Modifier.weight(1f)) {
                             Text(
-                                text = "启用服务器模式",
+                                text = "启用服务端中转",
                                 style = MaterialTheme.typography.bodyLarge
                             )
                             Text(
-                                text = "通过中转服务器连接",
+                                text = "通过中转服务器连接设备",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
@@ -161,6 +162,7 @@ fun SettingsScreen(
                                     when (connectionState) {
                                         is ServerConnection.ConnectionState.Connected -> Icons.Default.CheckCircle
                                         is ServerConnection.ConnectionState.Connecting -> Icons.Default.Refresh
+                                        is ServerConnection.ConnectionState.Reconnecting -> Icons.Default.Refresh
                                         is ServerConnection.ConnectionState.Error -> Icons.Default.Error
                                         else -> Icons.Default.Info
                                     },
@@ -172,6 +174,7 @@ fun SettingsScreen(
                                             is ServerConnection.ConnectionState.Disconnected -> "未连接"
                                             is ServerConnection.ConnectionState.Connecting -> "连接中..."
                                             is ServerConnection.ConnectionState.Connected -> "已连接服务器"
+                                            is ServerConnection.ConnectionState.Reconnecting -> "重连中（第${state.attempt}次，${state.delayMs / 1000}秒后）"
                                             is ServerConnection.ConnectionState.Error -> "错误: ${state.message}"
                                         },
                                         style = MaterialTheme.typography.bodyMedium

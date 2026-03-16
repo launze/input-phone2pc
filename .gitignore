@@ -37,6 +37,7 @@ release/
 
 # Gradle
 .gradle/
+.gradle-user/
 build/
 
 # Android Studio

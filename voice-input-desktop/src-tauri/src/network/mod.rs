@@ -158,6 +158,9 @@ async fn handle_server_messages(
                     .and_then(|v| v.as_str())
                     .unwrap_or("Unknown");
 
+                println!("📨 [收到] SERVER_PAIR_RESPONSE: success={}, from={}({}) -> to={}({})", 
+                         success, from_name, from_id, to_name, to_id);
+
                 if success {
                     let mut config = crate::storage::config::AppConfig::load();
                     let (other_id, other_name) = if from_id == my_device_id {
@@ -169,10 +172,55 @@ async fn handle_server_messages(
                     if !other_id.is_empty() {
                         config.add_paired_device(other_id.to_string(), other_name.to_string());
                         let _ = config.save();
+                        
+                        println!("🎉 [配对成功] 设备：{} ({})", other_name, other_id);
+                        println!("   配对详情：from={}({}) -> to={}({})", from_name, from_id, to_name, to_id);
+                        
+                        // 配对成功后，向服务器发送设备列表请求，间接表明自己在线
+                        // 这样服务器会将我们标记为在线，并通知配对的 App 端
+                        let device_list_req = serde_json::json!({
+                            "type": "DEVICE_LIST_REQUEST",
+                            "device_type": "android"
+                        });
+                        
+                        let ws_client = websocket::get_ws_client();
+                        let client = ws_client.lock().await;
+                        if let Err(e) = client.send(&device_list_req.to_string()).await {
+                            eprintln!("❌ [配对后] 发送 DEVICE_LIST_REQUEST 失败：{}", e);
+                        } else {
+                            println!("✅ [配对后] 已发送 DEVICE_LIST_REQUEST 请求设备列表");
+                        }
+                        
+                        // 触发前端更新 UI
+                        if let Some(ref handle) = app_handle {
+                            let payload = serde_json::json!({
+                                "device_id": other_id,
+                                "device_name": other_name,
+                                "device_type": "android",
+                                "paired_at": chrono::Utc::now().to_rfc3339()
+                            });
+                            handle.emit("device_paired", &payload).unwrap_or(());
+                            println!("✅ [配对成功] 已向前端发送 device_paired 事件");
+                        }
                     }
                 } else {
                     let message = msg.get("message").and_then(|v| v.as_str()).unwrap_or("unknown");
-                    eprintln!("SERVER_PAIR_RESPONSE failed: {}", message);
+                    eprintln!("❌ [配对失败] {}", message);
+                    eprintln!("   配对详情：from={}({}) -> to={}({})", from_name, from_id, to_name, to_id);
+                    
+                    // 配对失败也通知前端
+                    if let Some(ref handle) = app_handle {
+                        let payload = serde_json::json!({
+                            "success": false,
+                            "message": message,
+                            "from_device_id": from_id,
+                            "from_device_name": from_name,
+                            "to_device_id": to_id,
+                            "to_device_name": to_name
+                        });
+                        handle.emit("pair_failed", &payload).unwrap_or(());
+                        println!("✅ [配对失败] 已向前端发送 pair_failed 事件");
+                    }
                 }
             }
             "PAIRED_DEVICE_ONLINE" => {

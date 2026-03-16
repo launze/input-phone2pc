@@ -278,7 +278,10 @@ async fn handle_message(
             to_device_id,
             pin: _,
         } => {
+            info!("📋 收到配对请求：{} ({}) -> {} (PIN: 验证中)", from_device_name, from_device_id, to_device_id);
+            
             if device_id.as_ref() != Some(&from_device_id) {
+                warn!("❌ 配对请求验证失败：发送者 ID 不匹配");
                 let response = ServerMessage::ServerPairResponse {
                     success: false,
                     from_device_id: from_device_id.clone(),
@@ -292,6 +295,7 @@ async fn handle_message(
             }
 
             if from_device_id == to_device_id {
+                warn!("⚠️ 配对失败：设备不能与自己配对");
                 let response = ServerMessage::ServerPairResponse {
                     success: false,
                     from_device_id: from_device_id.clone(),
@@ -329,6 +333,7 @@ async fn handle_message(
                 &to_device_id,
                 &to_device_name,
             ) {
+                error!("❌ 配对持久化失败：{}", e);
                 let response = ServerMessage::ServerPairResponse {
                     success: false,
                     from_device_id: from_device_id.clone(),
@@ -341,7 +346,9 @@ async fn handle_message(
                 return Ok(());
             }
 
+            info!("✅ 配对已保存到数据库：{} <-> {}", from_device_id, to_device_id);
             device_manager.add_pairing(from_device_id.clone(), to_device_id.clone());
+            info!("✅ 配对已添加到内存管理器");
 
             let response = ServerMessage::ServerPairResponse {
                 success: true,
@@ -352,6 +359,7 @@ async fn handle_message(
                 message: "paired".to_string(),
             };
             tx.send(Message::Text(response.to_json()?))?;
+            info!("✅ 已向发起设备发送配对成功响应");
 
             let response_to_target = ServerMessage::ServerPairResponse {
                 success: true,
@@ -362,6 +370,7 @@ async fn handle_message(
                 message: "paired".to_string(),
             };
             device_manager.send_to_device(&to_device_id, Message::Text(response_to_target.to_json()?));
+            info!("✅ 已向目标设备发送配对成功响应");
 
             if let Some(from_device) = device_manager.get_device(&from_device_id) {
                 let notify_target = ServerMessage::PairedDeviceOnline {
@@ -370,6 +379,7 @@ async fn handle_message(
                     device_type: from_device.device_type.clone(),
                 };
                 device_manager.send_to_device(&to_device_id, Message::Text(notify_target.to_json()?));
+                info!("✅ 已向目标设备发送 PAIRED_DEVICE_ONLINE 通知");
             }
 
             let notify_from = ServerMessage::PairedDeviceOnline {
@@ -378,6 +388,8 @@ async fn handle_message(
                 device_type: to_device.device_type.clone(),
             };
             tx.send(Message::Text(notify_from.to_json()?))?;
+            info!("✅ 已向发起设备发送 PAIRED_DEVICE_ONLINE 通知");
+            info!("🎉 配对流程完成：{} ({}) <-> {} ({})", from_device_name, from_device_id, to_device_name, to_device_id);
         }
 
         ServerMessage::RelayMessage {

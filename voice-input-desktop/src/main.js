@@ -26,6 +26,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     const clearHistoryBtn = document.getElementById('clear-history-btn');
 
     let connectedDeviceId = null;
+    let pairedDeviceId = null;      // 配对设备 ID
+    let pairedDeviceName = null;    // 配对设备名称
     let isPaired = false;        // 已配对（有配对设备记录）
     let isDeviceOnline = false;  // 配对设备在线
     let serverStatus = 'disconnected';
@@ -142,6 +144,25 @@ document.addEventListener('DOMContentLoaded', async () => {
                     onDeviceConnected(deviceNameEl.textContent || 'Android设备', connectedDeviceId);
                 }
             }
+        });
+
+        // 监听配对成功事件
+        tauriEvent.listen('device_paired', (event) => {
+            console.log('✅ 配对成功事件:', JSON.stringify(event));
+            const data = event.payload;
+            pairedDeviceId = data.device_id;
+            pairedDeviceName = data.device_name;
+            deviceNameEl.textContent = '已连接：' + data.device_name;
+            deviceNameEl.style.display = 'block';
+            unpairBtn.style.display = 'block';
+            switchToHistoryView();
+        });
+
+        // 监听配对失败事件
+        tauriEvent.listen('pair_failed', (event) => {
+            console.log('❌ 配对失败事件:', JSON.stringify(event));
+            const data = event.payload;
+            alert('配对失败：' + (data.message || '未知错误'));
         });
 
         console.log('✅ 事件监听器已注册（使用 tauriEvent API）');

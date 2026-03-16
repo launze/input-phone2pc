@@ -18,17 +18,16 @@ data class ServerMsg(
     val message: String? = null,
     // DEVICE_LIST_RESPONSE
     val devices: List<ServerDeviceInfo>? = null,
-    // RELAY_MESSAGE
+    // RELAY_MESSAGE / SERVER_PAIR_RESPONSE
     @SerializedName("from_device_id") val fromDeviceId: String? = null,
+    @SerializedName("from_device_name") val fromDeviceName: String? = null,
     @SerializedName("to_device_id") val toDeviceId: String? = null,
+    @SerializedName("to_device_name") val toDeviceName: String? = null,
     val payload: com.google.gson.JsonObject? = null,
     // HEARTBEAT
     val timestamp: Long? = null,
     // ERROR
     val code: String? = null,
-    // SERVER_PAIR_REQUEST / SERVER_PAIR_RESPONSE
-    @SerializedName("from_device_name") val fromDeviceName: String? = null,
-    @SerializedName("to_device_name") val toDeviceName: String? = null,
     val pin: String? = null,
 )
 

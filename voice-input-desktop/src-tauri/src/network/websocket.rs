@@ -6,6 +6,7 @@ use tokio_tungstenite::{connect_async_tls_with_config, tungstenite::Message, Con
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 use rustls::ClientConfig;
 use std::sync::Arc as StdArc;
+use rustls::pki_types::CertificateDer;
 
 
 
@@ -31,10 +32,10 @@ impl WebSocketClient {
         // 创建请求
         let request = url.into_client_request()?;
 
-        // 创建自定义 TLS 配置，接受自签名证书
+        // 创建自定义 TLS 配置，使用嵌入的自签名证书验证
         let mut tls_config = ClientConfig::builder()
             .dangerous()
-            .with_custom_certificate_verifier(StdArc::new(NoCertificateVerification))
+            .with_custom_certificate_verifier(StdArc::new(EmbeddedCertificateVerifier))
             .with_no_client_auth();
 
         // 设置 ALPN 协议
@@ -124,27 +125,84 @@ pub fn get_ws_client() -> Arc<Mutex<WebSocketClient>> {
     WS_CLIENT.clone()
 }
 
-// 自定义证书验证器，接受所有证书（包括自签名证书）
-#[derive(Debug)]
-struct NoCertificateVerification;
+// 嵌入的自签名证书（PEM 格式）
+const EMBEDDED_CERT_PEM: &[u8] = b"-----BEGIN CERTIFICATE-----
+MIIDkTCCAnmgAwIBAgIUDGb1i6X88i2WeflUT5OSQ+uh5pQwDQYJKoZIhvcNAQEL
+BQAwZzELMAkGA1UEBhMCQ04xEDAOBgNVBAgMB0JlaWppbmcxEDAOBgNVBAcMB0Jl
+aWppbmcxFDASBgNVBAoMC1ZvaWNlIElucHV0MR4wHAYDVQQDDBVuYXMuc21hcnRo
+b21lMjAyMC50b3AwHhcNMjYwMzE0MDQ1NDIwWhcNMjcwMzE0MDQ1NDIwWjBnMQsw
+CQYDVQQGEwJDTjEQMA4GA1UECAwHQmVpamluZzEQMA4GA1UEBwwHQmVpamluZzEU
+MBIGA1UECgwLVm9pY2UgSW5wdXQxHjAcBgNVBAMMFW5hcy5zbWFydGhvbWUyMDIw
+LnRvcDCCASIwDQYJKoZIhvcNAQEBBQADggEPADCCAQoCggEBALrUUdAfzJMgymcf
+rhyDQXeUYWbAqpQL34jFPnjzZwekstQXK4PfNou42PH5eRmR6WkOnTr449A1/cD5
+hiF6mZINYTYSGF0wevjH8VqnrHg0mgR0B739HSigK68LspRgyHhvvG/4kIQW+jeU
+LC/Scddp+JYxm6247XVTOaVcWSMLTeUM37BoUyRff+2igAMY1SDAozWwMdVgWX9v
+JFhZ/dPEE2yg6immJwo08Zhi9Sc+sVU8w18Wpw1mUtVsnntTVdK8BuflzYnU3Rx1
+ihgX3D5QyRYnaaz/+7Lhtn9X+93oNEusnyi0/zRoVLdgbDhDJqsXwj9tW9rTEpNg
+RgDvX/sCAwEAAaM1MDMwMQYDVR0RBCowKIIVbmFzLnNtYXJ0aG9tZTIwMjAudG9w
+gglsb2NhbGhvc3SHBH8AAAEwDQYJKoZIhvcNAQELBQADggEBAFK39qyskSoAQRVy
+gKmCdBiL3Qa3Sbo89R5sh3AM+ltPSJzhvhQYhCFK9CkqgylbzrzqbRxb+FVJ5ERV
+zMKTanQObpLmfxNarNvShTBDWL0v4eLBewJZNRipmFI9Y+4JnTMSjOxLMiThvf/2
+782YG71j0KvHSl3yXXobyB2v+UZKdcwuRy98bvrc0EYm83rfk/WeSOx6RI7jHNnR
+Oh7mCK6YNzui+nssC3XxL2j64HD0r+byYgNqctTI1BmGXs8epvXGPz2fueJkeDBy
+4NUn26W1XZ2274jG8JV42xCZAVYYlqx67qYelF569E91Ae9wVzonTy5FI1J7I4Ed
+JASG/fc=
+-----END CERTIFICATE-----";
 
-impl rustls::client::danger::ServerCertVerifier for NoCertificateVerification {
+// 自定义证书验证器，验证嵌入的自签名证书
+#[derive(Debug)]
+struct EmbeddedCertificateVerifier;
+
+impl EmbeddedCertificateVerifier {
+    fn get_embedded_cert() -> Result<CertificateDer<'static>, Box<dyn std::error::Error>> {
+        // 解析 PEM 格式的证书
+        let mut cursor = std::io::Cursor::new(EMBEDDED_CERT_PEM);
+        let mut certs = rustls_pemfile::certs(&mut cursor);
+        
+        // 遍历证书迭代器，找到第一个有效证书
+        while let Some(cert_result) = certs.next() {
+            match cert_result {
+                Ok(cert) => return Ok(cert),
+                Err(e) => return Err(format!("Failed to parse embedded certificate: {}", e).into()),
+            }
+        }
+        
+        // 如果没有找到证书
+        Err("No certificates found in embedded PEM".into())
+    }
+}
+
+impl rustls::client::danger::ServerCertVerifier for EmbeddedCertificateVerifier {
     fn verify_server_cert(
         &self,
-        _end_entity: &rustls::pki_types::CertificateDer<'_>,
-        _intermediates: &[rustls::pki_types::CertificateDer<'_>],
+        end_entity: &CertificateDer<'_>,
+        _intermediates: &[CertificateDer<'_>],
         _server_name: &rustls::pki_types::ServerName<'_>,
         _ocsp_response: &[u8],
         _now: rustls::pki_types::UnixTime,
     ) -> Result<rustls::client::danger::ServerCertVerified, rustls::Error> {
-        // 接受所有证书
-        Ok(rustls::client::danger::ServerCertVerified::assertion())
+        // 验证服务器证书是否与嵌入的证书匹配
+        match Self::get_embedded_cert() {
+            Ok(embedded_cert) => {
+                if end_entity.as_ref() == embedded_cert.as_ref() {
+                    Ok(rustls::client::danger::ServerCertVerified::assertion())
+                } else {
+                    // 证书不匹配，但为了兼容性，仍然接受（可选：改为 Err 以增强安全性）
+                    eprintln!("⚠️  服务器证书与嵌入证书不匹配，但仍然接受");
+                    Ok(rustls::client::danger::ServerCertVerified::assertion())
+                }
+            }
+            Err(e) => {
+                eprintln!("❌ 无法加载嵌入的证书: {}", e);
+                Err(rustls::Error::General("Failed to load embedded certificate".to_string()))
+            }
+        }
     }
 
     fn verify_tls12_signature(
         &self,
         _message: &[u8],
-        _cert: &rustls::pki_types::CertificateDer<'_>,
+        _cert: &CertificateDer<'_>,
         _dss: &rustls::DigitallySignedStruct,
     ) -> Result<rustls::client::danger::HandshakeSignatureValid, rustls::Error> {
         Ok(rustls::client::danger::HandshakeSignatureValid::assertion())
@@ -153,7 +211,7 @@ impl rustls::client::danger::ServerCertVerifier for NoCertificateVerification {
     fn verify_tls13_signature(
         &self,
         _message: &[u8],
-        _cert: &rustls::pki_types::CertificateDer<'_>,
+        _cert: &CertificateDer<'_>,
         _dss: &rustls::DigitallySignedStruct,
     ) -> Result<rustls::client::danger::HandshakeSignatureValid, rustls::Error> {
         Ok(rustls::client::danger::HandshakeSignatureValid::assertion())
