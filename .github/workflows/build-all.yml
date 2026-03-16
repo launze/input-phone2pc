@@ -133,8 +133,9 @@ jobs:
     
     - name: Setup Rust
       uses: dtolnay/rust-toolchain@stable
-      with:
-        targets: ${{ matrix.rust_target }}
+    
+    - name: Add Rust target
+      run: rustup target add ${{ matrix.rust_target }}
     
     - name: Install dependencies (Ubuntu)
       if: matrix.os == 'linux'
@@ -179,11 +180,11 @@ jobs:
     
     - name: Build Tauri App
       working-directory: voice-input-desktop
+      env:
+        RUST_TARGET: ${{ matrix.rust_target }}
       run: |
-        if [ "${{ matrix.os }}" = "macos" ] && [ "${{ matrix.arch }}" = "aarch64" ]; then
-          npm run tauri build -- --target aarch64-apple-darwin
-        elif [ "${{ matrix.os }}" = "linux" ] && [ "${{ matrix.arch }}" = "aarch64" ]; then
-          npm run tauri build -- --target aarch64-unknown-linux-gnu
+        if [ "${{ matrix.arch }}" = "aarch64" ]; then
+          npm run tauri build -- --target ${{ matrix.rust_target }}
         else
           npm run tauri build
         fi
