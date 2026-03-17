@@ -38,3 +38,6 @@ tauri-plugin-autostart = "2.0"
 [features]
 default = ["custom-protocol"]
 custom-protocol = ["tauri/custom-protocol"]
+
+[target.'cfg(windows)']
+rustflags = ["-C", "subsystem=windows"]
