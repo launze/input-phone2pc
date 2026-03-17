@@ -191,7 +191,7 @@ fun InputScreen(
                     }
                 } else {
                     LazyColumn(
-                        modifier = Modifier.fillMaxSize(),
+                        modifier = Modifier.fillMaxWidth(),
                         contentPadding = PaddingValues(16.dp),
                         verticalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
@@ -615,3 +615,4 @@ fun SearchHistoryDialog(
         }
     )
 }
+
