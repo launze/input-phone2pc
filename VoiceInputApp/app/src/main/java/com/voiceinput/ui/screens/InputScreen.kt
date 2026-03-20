@@ -1,8 +1,33 @@
-﻿package com.voiceinput.ui.screens
+package com.voiceinput.ui.screens
 
-import androidx.compose.animation.*
-import androidx.compose.animation.core.*
-import androidx.compose.foundation.layout.*
+import android.content.Context
+import android.net.Uri
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.ExperimentalAnimationApi
+import androidx.compose.animation.expandHorizontally
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkHorizontally
+import androidx.compose.animation.shrinkVertically
+import androidx.compose.animation.togetherWith
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
@@ -16,12 +41,35 @@ import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Wifi
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Badge
+import androidx.compose.material3.Button
+import androidx.compose.material3.Card
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Divider
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.foundation.layout.imePadding
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import androidx.core.content.FileProvider
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.voiceinput.data.model.ServerDeviceInfo
 import com.voiceinput.network.ServerConnection
@@ -29,8 +77,9 @@ import com.voiceinput.ui.components.ConnectionStatusIndicator
 import com.voiceinput.ui.components.HistoryItemView
 import com.voiceinput.ui.components.InputField
 import com.voiceinput.viewmodel.InputViewModel
+import java.io.File
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalAnimationApi::class, ExperimentalMaterial3Api::class)
 @Composable
 fun InputScreen(
     viewModel: InputViewModel = viewModel(),
@@ -47,6 +96,26 @@ fun InputScreen(
     var showDeviceDialog by remember { mutableStateOf(false) }
     var showSearchDialog by remember { mutableStateOf(false) }
     var showClearHistoryDialog by remember { mutableStateOf(false) }
+    val context = LocalContext.current
+    var pendingCameraUri by remember { mutableStateOf<Uri?>(null) }
+
+    val imagePickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.PickVisualMedia()
+    ) { uri ->
+        if (uri != null) {
+            viewModel.sendImage(uri)
+        }
+    }
+
+    val cameraLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.TakePicture()
+    ) { success ->
+        val capturedUri = pendingCameraUri
+        pendingCameraUri = null
+        if (success && capturedUri != null) {
+            viewModel.sendImage(capturedUri)
+        }
+    }
 
     LaunchedEffect(Unit) {
         viewModel.startDiscovery()
@@ -67,7 +136,6 @@ fun InputScreen(
                     }
                 },
                 actions = {
-                    // 搜索历史按钮（有历史记录时显示）
                     AnimatedVisibility(
                         visible = historyItems.isNotEmpty(),
                         enter = fadeIn() + expandHorizontally(),
@@ -81,7 +149,6 @@ fun InputScreen(
                             )
                         }
                     }
-                    // 清空历史按钮（有历史记录时显示）
                     AnimatedVisibility(
                         visible = historyItems.isNotEmpty(),
                         enter = fadeIn() + expandHorizontally(),
@@ -95,7 +162,6 @@ fun InputScreen(
                             )
                         }
                     }
-                    // 连接设备按钮（未连接时显示）
                     AnimatedVisibility(
                         visible = !connectionStatus.connected,
                         enter = fadeIn() + expandHorizontally(),
@@ -109,7 +175,6 @@ fun InputScreen(
                             )
                         }
                     }
-                    // 设置按钮
                     IconButton(onClick = onNavigateToSettings) {
                         Icon(
                             Icons.Default.Settings,
@@ -130,12 +195,11 @@ fun InputScreen(
                 .fillMaxSize()
                 .padding(paddingValues)
         ) {
-            // History list or empty state with scan button
             AnimatedContent(
                 targetState = historyItems.isEmpty(),
                 transitionSpec = {
                     fadeIn(animationSpec = tween(300)) togetherWith
-                            fadeOut(animationSpec = tween(300))
+                        fadeOut(animationSpec = tween(300))
                 },
                 label = "history",
                 modifier = Modifier.weight(1f)
@@ -158,12 +222,11 @@ fun InputScreen(
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                                 Text(
-                                    text = "在手机上输入文字发送到电脑",
+                                    text = "在手机上输入文字或发送图片到电脑",
                                     style = MaterialTheme.typography.bodyMedium,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                             } else {
-                                // 未连接 + 无配对设备 → 显示扫码配对引导
                                 Text(
                                     text = if (pairedDevices.isEmpty()) "未配对任何设备" else "未连接设备",
                                     style = MaterialTheme.typography.titleMedium,
@@ -215,7 +278,6 @@ fun InputScreen(
                 }
             }
 
-            // Input area - always visible above IME
             Surface(
                 shadowElevation = 8.dp,
                 tonalElevation = 2.dp,
@@ -227,6 +289,16 @@ fun InputScreen(
                     text = inputText,
                     onTextChange = { viewModel.onInputTextChange(it) },
                     onSend = { viewModel.sendText() },
+                    onPickImage = {
+                        imagePickerLauncher.launch(
+                            PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
+                        )
+                    },
+                    onTakePhoto = {
+                        val outputUri = createCameraOutputUri(context)
+                        pendingCameraUri = outputUri
+                        cameraLauncher.launch(outputUri)
+                    },
                     enabled = connectionStatus.connected,
                     modifier = Modifier
                         .fillMaxWidth()
@@ -236,16 +308,17 @@ fun InputScreen(
         }
     }
 
-    // Device selection dialog - only show paired devices
     if (showDeviceDialog) {
         PairedDeviceSelectionDialog(
             pairedDevices = pairedDevices,
             serverDevices = serverDevices,
             onDeviceSelected = { deviceId, deviceName ->
                 val sd = serverDevices.firstOrNull { it.deviceId == deviceId }
-                    ?: com.voiceinput.data.model.ServerDeviceInfo(
-                        deviceId = deviceId, deviceName = deviceName,
-                        deviceType = "desktop", online = false
+                    ?: ServerDeviceInfo(
+                        deviceId = deviceId,
+                        deviceName = deviceName,
+                        deviceType = "desktop",
+                        online = false
                     )
                 viewModel.connectToServerDevice(sd)
                 showDeviceDialog = false
@@ -253,8 +326,7 @@ fun InputScreen(
             onDismiss = { showDeviceDialog = false }
         )
     }
-    
-    // Search history dialog
+
     if (showSearchDialog) {
         SearchHistoryDialog(
             onSearch = { query ->
@@ -270,8 +342,7 @@ fun InputScreen(
             }
         )
     }
-    
-    // Clear history confirmation dialog
+
     if (showClearHistoryDialog) {
         AlertDialog(
             onDismissRequest = { showClearHistoryDialog = false },
@@ -296,6 +367,21 @@ fun InputScreen(
     }
 }
 
+private fun createCameraOutputUri(context: Context): Uri {
+    val cameraDir = File(context.cacheDir, "camera").apply {
+        mkdirs()
+    }
+    val imageFile = File(cameraDir, "capture_${System.currentTimeMillis()}.jpg")
+    if (!imageFile.exists()) {
+        imageFile.createNewFile()
+    }
+    return FileProvider.getUriForFile(
+        context,
+        "${context.packageName}.fileprovider",
+        imageFile
+    )
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun DeviceSelectionDialog(
@@ -314,7 +400,6 @@ fun DeviceSelectionDialog(
             LazyColumn(
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                // Server devices section
                 if (isServerConnected) {
                     item {
                         Row(
@@ -390,10 +475,11 @@ fun DeviceSelectionDialog(
                                         )
                                     }
                                     Badge(
-                                        containerColor = if (device.online)
+                                        containerColor = if (device.online) {
                                             MaterialTheme.colorScheme.primary
-                                        else
+                                        } else {
                                             MaterialTheme.colorScheme.error
+                                        }
                                     ) {
                                         Text(if (device.online) "在线" else "离线")
                                     }
@@ -402,7 +488,6 @@ fun DeviceSelectionDialog(
                         }
                     }
 
-                    // Divider between sections
                     if (localDevices.isNotEmpty()) {
                         item {
                             Divider(modifier = Modifier.padding(vertical = 4.dp))
@@ -410,7 +495,6 @@ fun DeviceSelectionDialog(
                     }
                 }
 
-                // Local devices section
                 item {
                     Row(
                         horizontalArrangement = Arrangement.spacedBy(6.dp),
@@ -481,7 +565,6 @@ fun DeviceSelectionDialog(
                     }
                 }
 
-                // Hint if server not connected
                 if (!isServerConnected) {
                     item {
                         Text(
@@ -529,7 +612,9 @@ fun PairedDeviceSelectionDialog(
                             onClick = { onDeviceSelected(paired.deviceId, paired.deviceName) }
                         ) {
                             Row(
-                                modifier = Modifier.fillMaxWidth().padding(12.dp),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(12.dp),
                                 verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.spacedBy(12.dp)
                             ) {
@@ -541,16 +626,17 @@ fun PairedDeviceSelectionDialog(
                                 Column(modifier = Modifier.weight(1f)) {
                                     Text(paired.deviceName, style = MaterialTheme.typography.titleMedium)
                                     Text(
-                                        if (paired.localIp.isNotEmpty()) "局域网: :" else "服务器中转",
+                                        if (paired.localIp.isNotEmpty()) "局域网" else "服务器中转",
                                         style = MaterialTheme.typography.bodySmall,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant
                                     )
                                 }
                                 Badge(
-                                    containerColor = if (online)
+                                    containerColor = if (online) {
                                         MaterialTheme.colorScheme.primary
-                                    else
+                                    } else {
                                         MaterialTheme.colorScheme.surfaceVariant
+                                    }
                                 ) {
                                     Text(if (online) "在线" else "离线")
                                 }
@@ -566,7 +652,6 @@ fun PairedDeviceSelectionDialog(
     )
 }
 
-
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SearchHistoryDialog(
@@ -574,7 +659,7 @@ fun SearchHistoryDialog(
     onDismiss: () -> Unit
 ) {
     var searchQuery by remember { mutableStateOf("") }
-    
+
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("搜索历史记录") },
@@ -582,7 +667,7 @@ fun SearchHistoryDialog(
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedTextField(
                     value = searchQuery,
-                    onValueChange = { 
+                    onValueChange = {
                         searchQuery = it
                         onSearch(it)
                     },
@@ -591,10 +676,12 @@ fun SearchHistoryDialog(
                     singleLine = true,
                     trailingIcon = {
                         if (searchQuery.isNotEmpty()) {
-                            IconButton(onClick = { 
-                                searchQuery = ""
-                                onSearch("")
-                            }) {
+                            IconButton(
+                                onClick = {
+                                    searchQuery = ""
+                                    onSearch("")
+                                }
+                            ) {
                                 Icon(Icons.Default.Clear, "清除")
                             }
                         }
@@ -615,4 +702,3 @@ fun SearchHistoryDialog(
         }
     )
 }
-

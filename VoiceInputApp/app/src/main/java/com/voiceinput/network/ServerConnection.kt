@@ -270,26 +270,26 @@ class ServerConnection(private val context: Context) {
         sendRaw(json.toString())
     }
 
-    fun sendRelayMessage(toDeviceId: String, payload: JsonObject) {
+    fun sendRelayMessage(toDeviceId: String, payload: JsonObject): Boolean {
         val json = JsonObject().apply {
             addProperty("type", "RELAY_MESSAGE")
             addProperty("from_device_id", registeredDeviceId ?: "")
             addProperty("to_device_id", toDeviceId)
             add("payload", payload)
         }
-        sendRaw(json.toString())
+        return sendRaw(json.toString())
     }
 
-    fun sendUnpairRequest(fromDeviceId: String, toDeviceId: String) {
+    fun sendUnpairRequest(fromDeviceId: String, toDeviceId: String): Boolean {
         val json = JsonObject().apply {
             addProperty("type", "UNPAIR_REQUEST")
             addProperty("from_device_id", fromDeviceId)
             addProperty("to_device_id", toDeviceId)
         }
-        sendRaw(json.toString())
+        return sendRaw(json.toString())
     }
 
-    fun sendPairRequest(fromDeviceId: String, fromDeviceName: String, toDeviceId: String) {
+    fun sendPairRequest(fromDeviceId: String, fromDeviceName: String, toDeviceId: String): Boolean {
         val json = JsonObject().apply {
             addProperty("type", "SERVER_PAIR_REQUEST")
             addProperty("from_device_id", fromDeviceId)
@@ -297,7 +297,7 @@ class ServerConnection(private val context: Context) {
             addProperty("to_device_id", toDeviceId)
             addProperty("pin", "")
         }
-        sendRaw(json.toString())
+        return sendRaw(json.toString())
     }
 
     fun sendHeartbeat() {

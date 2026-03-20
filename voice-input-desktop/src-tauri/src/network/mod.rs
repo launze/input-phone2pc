@@ -3,6 +3,7 @@ pub mod discovery;
 pub mod protocol;
 pub mod websocket;
 
+use base64::Engine;
 use std::error::Error;
 use tauri::{AppHandle, Emitter};
 
@@ -102,38 +103,50 @@ async fn handle_server_messages(
                     .unwrap_or("unknown");
                 if let Some(payload) = msg.get("payload") {
                     let payload_type = payload.get("type").and_then(|v| v.as_str()).unwrap_or("");
-                    if payload_type == "TEXT_INPUT" {
-                        if let Some(text) = payload.get("text").and_then(|v| v.as_str()) {
-                            crate::input::simulate_text_input(text);
+                    match payload_type {
+                        "TEXT_INPUT" => {
+                            if let Some(text) = payload.get("text").and_then(|v| v.as_str()) {
+                                crate::input::simulate_text_input(text);
 
-                            if let Some(ref handle) = app_handle {
-                                let text_payload = serde_json::json!({
-                                    "text": text,
-                                    "from_device_id": from_id,
-                                    "via": "server",
-                                    "timestamp": chrono::Utc::now().timestamp_millis()
-                                });
-                                handle.emit("text_received", &text_payload).unwrap_or(());
-                            }
+                                if let Some(ref handle) = app_handle {
+                                    let text_payload = serde_json::json!({
+                                        "text": text,
+                                        "from_device_id": from_id,
+                                        "via": "server",
+                                        "timestamp": chrono::Utc::now().timestamp_millis()
+                                    });
+                                    handle.emit("text_received", &text_payload).unwrap_or(());
+                                }
 
-                            let ack_payload = serde_json::json!({
-                                "type": "INPUT_ACK",
-                                "success": true,
-                                "timestamp": chrono::Utc::now().timestamp_millis()
-                            });
-                            let relay_ack = serde_json::json!({
-                                "type": "RELAY_MESSAGE",
-                                "from_device_id": my_device_id,
-                                "to_device_id": from_id,
-                                "payload": ack_payload
-                            });
-
-                            let ws_client = websocket::get_ws_client();
-                            let client = ws_client.lock().await;
-                            if let Err(e) = client.send(&relay_ack.to_string()).await {
-                                eprintln!("Failed to send INPUT_ACK relay: {}", e);
+                                send_relay_ack(&my_device_id, from_id, "text", true).await;
                             }
                         }
+                        "CLIPBOARD_IMAGE" => {
+                            let success = payload
+                                .get("data")
+                                .and_then(|v| v.as_str())
+                                .and_then(|data| {
+                                    base64::engine::general_purpose::STANDARD
+                                        .decode(data)
+                                        .ok()
+                                })
+                                .map(|bytes| crate::input::simulate_image_input(&bytes).is_ok())
+                                .unwrap_or(false);
+
+                            if success {
+                                if let Some(ref handle) = app_handle {
+                                    let image_payload = serde_json::json!({
+                                        "from_device_id": from_id,
+                                        "via": "server",
+                                        "timestamp": chrono::Utc::now().timestamp_millis()
+                                    });
+                                    handle.emit("image_received", &image_payload).unwrap_or(());
+                                }
+                            }
+
+                            send_relay_ack(&my_device_id, from_id, "image", success).await;
+                        }
+                        _ => {}
                     }
                 }
             }
@@ -310,5 +323,26 @@ async fn server_heartbeat() {
         } else {
             break;
         }
+    }
+}
+
+async fn send_relay_ack(my_device_id: &str, target_device_id: &str, content_type: &str, success: bool) {
+    let ack_payload = serde_json::json!({
+        "type": "INPUT_ACK",
+        "success": success,
+        "content_type": content_type,
+        "timestamp": chrono::Utc::now().timestamp_millis()
+    });
+    let relay_ack = serde_json::json!({
+        "type": "RELAY_MESSAGE",
+        "from_device_id": my_device_id,
+        "to_device_id": target_device_id,
+        "payload": ack_payload
+    });
+
+    let ws_client = websocket::get_ws_client();
+    let client = ws_client.lock().await;
+    if let Err(e) = client.send(&relay_ack.to_string()).await {
+        eprintln!("Failed to send INPUT_ACK relay: {}", e);
     }
 }

@@ -1,7 +1,9 @@
-﻿use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+use tokio::net::tcp::OwnedWriteHalf;
 use tokio::net::{TcpListener, TcpStream};
 use tauri::{AppHandle, Emitter};
 
+use base64::Engine;
 use crate::crypto::{decrypt_string, EncryptionKey};
 use crate::input;
 use std::error::Error;
@@ -38,7 +40,6 @@ pub async fn start_tcp_server(app_handle: AppHandle) -> Result<(), Box<dyn Error
 }
 
 async fn handle_client(socket: TcpStream, app_handle: AppHandle) -> Result<(), Box<dyn Error>> {
-    // Only emit connected after PAIR_REQUEST succeeds.
     let mut paired_peer: Option<(String, String)> = None;
 
     let (reader, mut writer) = socket.into_split();
@@ -123,57 +124,21 @@ async fn handle_client(socket: TcpStream, app_handle: AppHandle) -> Result<(), B
                                     if let Ok(decrypted_message) =
                                         serde_json::from_str::<serde_json::Value>(&decrypted_json)
                                     {
-                                        if let Some(decrypted_type) =
-                                            decrypted_message.get("type").and_then(|v| v.as_str())
-                                        {
-                                            if decrypted_type == "TEXT_INPUT" {
-                                                if let Some(text) =
-                                                    decrypted_message.get("text").and_then(|v| v.as_str())
-                                                {
-                                                    input::simulate_text_input(text);
-
-                                                    let text_payload = serde_json::json!({
-                                                        "text": text,
-                                                        "via": "lan_encrypted",
-                                                        "timestamp": chrono::Utc::now().timestamp_millis()
-                                                    });
-                                                    app_handle
-                                                        .emit("text_received", &text_payload)
-                                                        .unwrap_or(());
-
-                                                    let response = serde_json::json!({
-                                                        "type": "INPUT_ACK",
-                                                        "success": true
-                                                    });
-                                                    writer.write_all(response.to_string().as_bytes()).await?;
-                                                    writer.write_all(b"\n").await?;
-                                                }
-                                            }
-                                        }
+                                        handle_input_message(
+                                            &decrypted_message,
+                                            &mut writer,
+                                            &app_handle,
+                                            "lan_encrypted",
+                                        )
+                                        .await?;
                                     }
                                 }
                             }
                         }
                     }
                 }
-                "TEXT_INPUT" => {
-                    if let Some(text) = message.get("text").and_then(|v| v.as_str()) {
-                        input::simulate_text_input(text);
-
-                        let text_payload = serde_json::json!({
-                            "text": text,
-                            "via": "lan",
-                            "timestamp": chrono::Utc::now().timestamp_millis()
-                        });
-                        app_handle.emit("text_received", &text_payload).unwrap_or(());
-
-                        let response = serde_json::json!({
-                            "type": "INPUT_ACK",
-                            "success": true
-                        });
-                        writer.write_all(response.to_string().as_bytes()).await?;
-                        writer.write_all(b"\n").await?;
-                    }
+                "TEXT_INPUT" | "IMAGE_INPUT" => {
+                    handle_input_message(&message, &mut writer, &app_handle, "lan").await?;
                 }
                 "HEARTBEAT" => {
                     let response = serde_json::json!({
@@ -188,5 +153,74 @@ async fn handle_client(socket: TcpStream, app_handle: AppHandle) -> Result<(), B
         }
     }
 
+    Ok(())
+}
+
+async fn handle_input_message(
+    message: &serde_json::Value,
+    writer: &mut OwnedWriteHalf,
+    app_handle: &AppHandle,
+    via: &str,
+) -> Result<(), Box<dyn Error>> {
+    let Some(msg_type) = message.get("type").and_then(|v| v.as_str()) else {
+        return Ok(());
+    };
+
+    match msg_type {
+        "TEXT_INPUT" => {
+            if let Some(text) = message.get("text").and_then(|v| v.as_str()) {
+                input::simulate_text_input(text);
+
+                let text_payload = serde_json::json!({
+                    "text": text,
+                    "via": via,
+                    "timestamp": chrono::Utc::now().timestamp_millis()
+                });
+                app_handle.emit("text_received", &text_payload).unwrap_or(());
+
+                send_input_ack(writer, "text", true).await?;
+            }
+        }
+        "IMAGE_INPUT" => {
+            let success = message
+                .get("image_data")
+                .and_then(|v| v.as_str())
+                .and_then(|data| {
+                    base64::engine::general_purpose::STANDARD
+                        .decode(data)
+                        .ok()
+                })
+                .map(|bytes| input::simulate_image_input(&bytes).is_ok())
+                .unwrap_or(false);
+
+            if success {
+                let image_payload = serde_json::json!({
+                    "via": via,
+                    "timestamp": chrono::Utc::now().timestamp_millis()
+                });
+                app_handle.emit("image_received", &image_payload).unwrap_or(());
+            }
+
+            send_input_ack(writer, "image", success).await?;
+        }
+        _ => {}
+    }
+
+    Ok(())
+}
+
+async fn send_input_ack(
+    writer: &mut OwnedWriteHalf,
+    content_type: &str,
+    success: bool,
+) -> Result<(), Box<dyn Error>> {
+    let response = serde_json::json!({
+        "type": "INPUT_ACK",
+        "success": success,
+        "content_type": content_type,
+        "timestamp": chrono::Utc::now().timestamp_millis()
+    });
+    writer.write_all(response.to_string().as_bytes()).await?;
+    writer.write_all(b"\n").await?;
     Ok(())
 }

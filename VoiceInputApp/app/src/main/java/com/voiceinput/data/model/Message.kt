@@ -48,6 +48,19 @@ sealed class Message {
         val type = "TEXT_INPUT"
     }
 
+    data class ImageInput(
+        @SerializedName("mime_type") val mimeType: String,
+        @SerializedName("file_name") val fileName: String,
+        @SerializedName("image_data") val imageData: String,
+        val width: Int,
+        val height: Int,
+        val size: Int,
+        val timestamp: Long
+    ) : Message() {
+        @SerializedName("type")
+        val type = "IMAGE_INPUT"
+    }
+
     data class InputAck(
         val success: Boolean,
         val timestamp: Long

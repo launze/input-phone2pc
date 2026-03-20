@@ -397,6 +397,15 @@ async fn handle_message(
             to_device_id,
             payload,
         } => {
+            if let Err(message) = validate_relay_payload(&payload) {
+                let error_response = ServerMessage::Error {
+                    code: "INVALID_RELAY_PAYLOAD".to_string(),
+                    message,
+                };
+                tx.send(Message::Text(error_response.to_json()?))?;
+                return Ok(());
+            }
+
             let relay_msg = ServerMessage::RelayMessage {
                 from_device_id: from_device_id.clone(),
                 to_device_id: to_device_id.clone(),
@@ -484,6 +493,36 @@ async fn handle_message(
         _ => {
             warn!("unhandled server message");
         }
+    }
+
+    Ok(())
+}
+
+fn validate_relay_payload(payload: &serde_json::Value) -> std::result::Result<(), String> {
+    let payload_type = payload
+        .get("type")
+        .and_then(|v| v.as_str())
+        .unwrap_or_default();
+
+    if payload_type != "CLIPBOARD_IMAGE" {
+        return Ok(());
+    }
+
+    let image_data = payload
+        .get("data")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| "missing image data".to_string())?;
+    let mime_type = payload
+        .get("mime_type")
+        .and_then(|v| v.as_str())
+        .unwrap_or_default();
+
+    if !matches!(mime_type, "image/jpeg" | "image/png") {
+        return Err("unsupported image mime type".to_string());
+    }
+
+    if image_data.len() > 6_000_000 {
+        return Err("image payload too large".to_string());
     }
 
     Ok(())

@@ -108,6 +108,17 @@ pub enum ServerMessage {
         device_name: String,
     },
 
+    // 图片消息
+    #[serde(rename = "IMAGE_MESSAGE")]
+    ImageMessage {
+        from_device_id: String,
+        to_device_id: String,
+        image_data: String, // base64 encoded
+        image_format: String, // "jpeg", "png", etc.
+        image_size: u32, // original size in bytes
+        timestamp: i64,
+    },
+
     // 加密相关
     #[serde(rename = "ENCRYPTION_KEY_EXCHANGE")]
     EncryptionKeyExchange {

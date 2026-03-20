@@ -1,12 +1,14 @@
 ﻿package com.voiceinput.viewmodel
 
 import android.app.Application
+import android.net.Uri
 import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.google.gson.Gson
 import com.google.gson.JsonObject
 
+import com.voiceinput.data.model.ClipboardImagePayload
 import com.voiceinput.data.ConfigManager
 import com.voiceinput.data.model.Device
 import com.voiceinput.data.model.HistoryItem
@@ -15,6 +17,7 @@ import com.voiceinput.data.model.ServerDeviceInfo
 import com.voiceinput.data.repository.HistoryRepository
 import com.voiceinput.network.NetworkManager
 import com.voiceinput.network.ServerConnection
+import com.voiceinput.util.ImageTransferCodec
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -88,7 +91,12 @@ class InputViewModel(application: Application) : AndroidViewModel(application) {
             Log.d(TAG, "Relay message from $fromDeviceId: $payload")
             val type = payload.get("type")?.asString
             if (type == "INPUT_ACK") {
-                addLog("收到输入确认 from $fromDeviceId")
+                val contentType = payload.get("content_type")?.asString ?: "text"
+                if (contentType == "image") {
+                    addLog("收到图片确认 from $fromDeviceId")
+                } else {
+                    addLog("收到输入确认 from $fromDeviceId")
+                }
             }
         }
 
@@ -424,6 +432,24 @@ class InputViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun sendImage(uri: Uri) {
+        viewModelScope.launch {
+            if (!connectionStatus.value.connected) {
+                addLog("未连接到任何设备，无法发送图片")
+                return@launch
+            }
+
+            addLog("正在压缩图片...")
+            val payload = ImageTransferCodec.encodeFromUri(getApplication(), uri)
+            if (payload == null) {
+                addLog("图片处理失败")
+                return@launch
+            }
+
+            sendEncodedImage(payload)
+        }
+    }
+
     private fun sendTextViaRelay(text: String) {
         val targetId = relayTargetDeviceId ?: return
         val payload = JsonObject().apply {
@@ -431,8 +457,48 @@ class InputViewModel(application: Application) : AndroidViewModel(application) {
             addProperty("text", text)
             addProperty("timestamp", System.currentTimeMillis())
         }
-        serverConnection.sendRelayMessage(targetId, payload)
-        addLog("已发送文本到 ${relayTargetDeviceName ?: targetId} (中转)")
+        if (serverConnection.sendRelayMessage(targetId, payload)) {
+            addLog("已发送文本到 ${relayTargetDeviceName ?: targetId} (中转)")
+        } else {
+            addLog("文本发送失败")
+        }
+    }
+
+    private suspend fun sendEncodedImage(payload: ClipboardImagePayload) {
+        val success = if (relayTargetDeviceId != null && serverConnection.isConnected()) {
+            sendImageViaRelay(payload)
+        } else if (networkManager.isConnected.value) {
+            networkManager.sendImage(payload)
+        } else {
+            addLog("未连接到任何设备，无法发送图片")
+            false
+        }
+
+        if (success) {
+            addLog("图片已发送，PC 端将自动粘贴")
+        } else {
+            addLog("图片发送失败")
+        }
+    }
+
+    private fun sendImageViaRelay(payload: ClipboardImagePayload): Boolean {
+        val targetId = relayTargetDeviceId ?: return false
+        val relayPayload = JsonObject().apply {
+            addProperty("type", "CLIPBOARD_IMAGE")
+            addProperty("mime_type", payload.mimeType)
+            addProperty("file_name", payload.fileName)
+            addProperty("data", payload.imageData)
+            addProperty("width", payload.width)
+            addProperty("height", payload.height)
+            addProperty("size", payload.size)
+            addProperty("timestamp", System.currentTimeMillis())
+        }
+        return if (serverConnection.sendRelayMessage(targetId, relayPayload)) {
+            addLog("已发送图片到 ${relayTargetDeviceName ?: targetId} (中转)")
+            true
+        } else {
+            false
+        }
     }
 
     fun onHistoryItemClick(item: HistoryItem) {

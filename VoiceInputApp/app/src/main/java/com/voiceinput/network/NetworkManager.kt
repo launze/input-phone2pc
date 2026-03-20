@@ -1,6 +1,7 @@
 package com.voiceinput.network
 
 import com.voiceinput.data.model.Device
+import com.voiceinput.data.model.ClipboardImagePayload
 import com.voiceinput.data.model.Message
 import com.voiceinput.util.EncryptionUtil
 import kotlinx.coroutines.*
@@ -232,18 +233,33 @@ class NetworkManager {
     }
 
     suspend fun sendText(text: String): Boolean {
+        val message = Message.TextInput(
+            text = text,
+            timestamp = System.currentTimeMillis()
+        )
+        return sendPayload(message)
+    }
+
+    suspend fun sendImage(payload: ClipboardImagePayload): Boolean {
+        val message = Message.ImageInput(
+            mimeType = payload.mimeType,
+            fileName = payload.fileName,
+            imageData = payload.imageData,
+            width = payload.width,
+            height = payload.height,
+            size = payload.size,
+            timestamp = System.currentTimeMillis()
+        )
+        return sendPayload(message)
+    }
+
+    private suspend fun sendPayload(message: Message): Boolean {
         return withContext(Dispatchers.IO) {
             try {
                 if (!_isConnected.value || tcpConnection == null) {
                     _connectionError.value = "未连接到设备"
                     return@withContext false
                 }
-
-                // 使用加密消息发送
-                val message = Message.TextInput(
-                    text = text,
-                    timestamp = System.currentTimeMillis()
-                )
                 
                 encryptionKey?.let { key ->
                     val messageJson = com.google.gson.Gson().toJson(message)
