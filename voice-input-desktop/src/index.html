@@ -84,10 +84,90 @@
             <div id="history-section" class="history-section" style="display:none;">
                 <div class="history-header">
                     <span>📝 接收记录</span>
-                    <button id="clear-history-btn" class="btn-small">清空</button>
+                    <div class="history-actions">
+                        <button id="toggle-ai-panel-btn" class="btn-small">AI 报告</button>
+                        <button id="toggle-ai-settings-btn" class="btn-small">AI 设置</button>
+                        <button id="export-week-btn" class="btn-small">导出本周</button>
+                        <button id="export-month-btn" class="btn-small">导出本月</button>
+                        <input type="date" id="export-start-date" class="date-input">
+                        <input type="date" id="export-end-date" class="date-input">
+                        <button id="export-range-btn" class="btn-small">导出区间</button>
+                        <button id="clear-history-btn" class="btn-small">清空</button>
+                    </div>
+                </div>
+                <div id="ai-report-panel" class="ai-report-panel" style="display:none;">
+                    <div class="ai-panel-toolbar">
+                        <div class="ai-panel-summary">
+                            <div class="ai-panel-title">AI 周报 / 月报</div>
+                            <div id="ai-setup-hint" class="ai-panel-hint">基于本地历史记录生成报告，可导出为 Word。</div>
+                        </div>
+                        <div class="ai-run-row">
+                            <div class="ai-run-actions">
+                                <button id="generate-weekly-report-btn" class="btn-small btn-primary">生成周报</button>
+                                <button id="generate-monthly-report-btn" class="btn-small btn-primary">生成月报</button>
+                            </div>
+                            <div id="ai-report-status" class="ai-report-status"></div>
+                        </div>
+                    </div>
+                    <div id="ai-config-card" class="ai-config-card" style="display:none;">
+                        <div class="ai-card-header">
+                            <div>
+                                <div class="ai-card-title">OpenAI 报告配置</div>
+                                <div class="ai-card-subtitle">可自定义 API Key、URL、模型名称及周报/月报模板</div>
+                            </div>
+                            <button id="save-openai-config-btn" class="btn-small">保存配置</button>
+                        </div>
+                        <div class="ai-config-grid">
+                            <label class="ai-field">
+                                <span>API Key</span>
+                                <input id="openai-api-key" type="password" placeholder="sk-..." autocomplete="off">
+                            </label>
+                            <label class="ai-field">
+                                <span>API URL</span>
+                                <input id="openai-api-url" type="text" placeholder="https://api.openai.com/v1/responses">
+                            </label>
+                            <label class="ai-field">
+                                <span>Model Name</span>
+                                <input id="openai-model-name" type="text" placeholder="gpt-5-mini">
+                            </label>
+                        </div>
+                        <div class="ai-template-hint">
+                            OpenAI 默认使用 <code>/v1/responses</code>；阿里云百炼兼容模式可直接填写 <code>https://dashscope.aliyuncs.com/compatible-mode/v1</code>，程序会自动补全到 <code>/chat/completions</code>。
+                        </div>
+                        <div class="ai-template-grid">
+                            <label class="ai-field">
+                                <span>周报模板</span>
+                                <textarea id="weekly-prompt-template" rows="9"></textarea>
+                            </label>
+                            <label class="ai-field">
+                                <span>月报模板</span>
+                                <textarea id="monthly-prompt-template" rows="9"></textarea>
+                            </label>
+                        </div>
+                        <div class="ai-template-hint">
+                            可用占位符：<code>{{period_label}}</code>、<code>{{start_date}}</code>、<code>{{end_date}}</code>、<code>{{record_count}}</code>、<code>{{records}}</code>
+                        </div>
+                    </div>
+                    <div class="ai-output-card">
+                        <div class="ai-card-header">
+                            <div>
+                                <div class="ai-card-title">生成结果</div>
+                                <div class="ai-card-subtitle">内容可直接复制到邮件、飞书或周报系统</div>
+                            </div>
+                            <div class="ai-output-actions">
+                                <button id="export-ai-report-word-btn" class="btn-small">导出 Word</button>
+                                <button id="copy-ai-report-btn" class="btn-small">复制结果</button>
+                            </div>
+                        </div>
+                        <textarea id="ai-report-output" class="ai-report-output" placeholder="点击“生成周报”或“生成月报”后，这里会显示 AI 输出内容。"></textarea>
+                    </div>
                 </div>
                 <div id="history-list" class="history-list">
                     <div class="history-empty" id="history-empty">等待手机发送文字...</div>
+                </div>
+                <div id="history-pagination" class="history-pagination" style="display:none;">
+                    <span id="history-page-hint" class="history-page-hint"></span>
+                    <button id="load-more-history-btn" class="btn-small">加载更多</button>
                 </div>
             </div>
         </div>

@@ -24,6 +24,10 @@ data class ServerMsg(
     @SerializedName("to_device_id") val toDeviceId: String? = null,
     @SerializedName("to_device_name") val toDeviceName: String? = null,
     val payload: com.google.gson.JsonObject? = null,
+    @SerializedName("message_id") val messageId: String? = null,
+    @SerializedName("stored_at") val storedAt: Long? = null,
+    @SerializedName("delivery_mode") val deliveryMode: String? = null,
+    val queued: Boolean? = null,
     // HEARTBEAT
     val timestamp: Long? = null,
     // ERROR

@@ -1,4 +1,4 @@
-﻿mod crypto;
+mod crypto;
 mod db;
 mod device_manager;
 mod protocol;
@@ -173,7 +173,9 @@ where
     while let Some(msg) = ws_receiver.next().await {
         match msg {
             Ok(Message::Text(text)) => {
-                if let Err(e) = handle_message(&text, &mut device_id, &tx, &device_manager, &pairing_db).await {
+                if let Err(e) =
+                    handle_message(&text, &mut device_id, &tx, &device_manager, &pairing_db).await
+                {
                     error!("handle message error: {}", e);
                 }
             }
@@ -215,13 +217,21 @@ async fn handle_message(
             version: _,
         } => {
             let session_id = Uuid::new_v4().to_string();
-            device_manager.register_device(
+            if let Err(error) = device_manager.register_device(
                 dev_id.clone(),
                 device_name.clone(),
                 device_type.clone(),
                 session_id.clone(),
                 tx.clone(),
-            );
+            ) {
+                let response = ServerMessage::ServerRegisterResponse {
+                    success: false,
+                    session_id: String::new(),
+                    message: error,
+                };
+                tx.send(Message::Text(response.to_json()?))?;
+                return Ok(());
+            }
             *device_id = Some(dev_id.clone());
 
             let response = ServerMessage::ServerRegisterResponse {
@@ -230,7 +240,10 @@ async fn handle_message(
                 message: "registered".to_string(),
             };
             tx.send(Message::Text(response.to_json()?))?;
-            info!("device registered: {} ({}) [{}]", device_name, dev_id, device_type);
+            info!(
+                "device registered: {} ({}) [{}]",
+                device_name, dev_id, device_type
+            );
 
             if let Ok(paired_list) = pairing_db.get_paired_devices(&dev_id) {
                 for (paired_id, paired_name) in &paired_list {
@@ -247,12 +260,14 @@ async fn handle_message(
                             device_name: device_name.clone(),
                             device_type: device_type.clone(),
                         };
-                        device_manager.send_to_device(
-                            paired_id,
-                            Message::Text(notify_existing.to_json()?),
-                        );
+                        device_manager
+                            .send_to_device(paired_id, Message::Text(notify_existing.to_json()?));
                     }
                 }
+            }
+
+            if let Err(error) = deliver_pending_messages(&dev_id, &device_manager, &pairing_db) {
+                error!("deliver pending messages failed for {}: {}", dev_id, error);
             }
         }
 
@@ -268,7 +283,9 @@ async fn handle_message(
                 })
                 .collect();
 
-            let response = ServerMessage::DeviceListResponse { devices: device_infos };
+            let response = ServerMessage::DeviceListResponse {
+                devices: device_infos,
+            };
             tx.send(Message::Text(response.to_json()?))?;
         }
 
@@ -278,8 +295,11 @@ async fn handle_message(
             to_device_id,
             pin: _,
         } => {
-            info!("📋 收到配对请求：{} ({}) -> {} (PIN: 验证中)", from_device_name, from_device_id, to_device_id);
-            
+            info!(
+                "📋 收到配对请求：{} ({}) -> {} (PIN: 验证中)",
+                from_device_name, from_device_id, to_device_id
+            );
+
             if device_id.as_ref() != Some(&from_device_id) {
                 warn!("❌ 配对请求验证失败：发送者 ID 不匹配");
                 let response = ServerMessage::ServerPairResponse {
@@ -346,7 +366,10 @@ async fn handle_message(
                 return Ok(());
             }
 
-            info!("✅ 配对已保存到数据库：{} <-> {}", from_device_id, to_device_id);
+            info!(
+                "✅ 配对已保存到数据库：{} <-> {}",
+                from_device_id, to_device_id
+            );
             device_manager.add_pairing(from_device_id.clone(), to_device_id.clone());
             info!("✅ 配对已添加到内存管理器");
 
@@ -369,7 +392,8 @@ async fn handle_message(
                 to_device_name: to_device_name.clone(),
                 message: "paired".to_string(),
             };
-            device_manager.send_to_device(&to_device_id, Message::Text(response_to_target.to_json()?));
+            device_manager
+                .send_to_device(&to_device_id, Message::Text(response_to_target.to_json()?));
             info!("✅ 已向目标设备发送配对成功响应");
 
             if let Some(from_device) = device_manager.get_device(&from_device_id) {
@@ -378,7 +402,8 @@ async fn handle_message(
                     device_name: from_device_name.clone(),
                     device_type: from_device.device_type.clone(),
                 };
-                device_manager.send_to_device(&to_device_id, Message::Text(notify_target.to_json()?));
+                device_manager
+                    .send_to_device(&to_device_id, Message::Text(notify_target.to_json()?));
                 info!("✅ 已向目标设备发送 PAIRED_DEVICE_ONLINE 通知");
             }
 
@@ -389,14 +414,59 @@ async fn handle_message(
             };
             tx.send(Message::Text(notify_from.to_json()?))?;
             info!("✅ 已向发起设备发送 PAIRED_DEVICE_ONLINE 通知");
-            info!("🎉 配对流程完成：{} ({}) <-> {} ({})", from_device_name, from_device_id, to_device_name, to_device_id);
+            info!(
+                "🎉 配对流程完成：{} ({}) <-> {} ({})",
+                from_device_name, from_device_id, to_device_name, to_device_id
+            );
         }
 
         ServerMessage::RelayMessage {
             from_device_id,
             to_device_id,
             payload,
+            ..
         } => {
+            if device_id.as_ref() != Some(&from_device_id) {
+                let error_response = ServerMessage::Error {
+                    code: "INVALID_SENDER".to_string(),
+                    message: "sender device mismatch".to_string(),
+                };
+                tx.send(Message::Text(error_response.to_json()?))?;
+                return Ok(());
+            }
+
+            let payload_type = payload
+                .get("type")
+                .and_then(|value| value.as_str())
+                .unwrap_or_default();
+
+            if payload_type == "INPUT_ACK" {
+                if let Some(server_message_id) = payload
+                    .get("server_message_id")
+                    .and_then(|value| value.as_str())
+                {
+                    let _ = pairing_db.mark_message_delivered(server_message_id);
+                }
+
+                let relay_msg = ServerMessage::RelayMessage {
+                    from_device_id: from_device_id.clone(),
+                    to_device_id: to_device_id.clone(),
+                    payload,
+                    message_id: None,
+                    from_device_name: None,
+                    stored_at: None,
+                    delivery_mode: Some("ack".to_string()),
+                };
+
+                if !device_manager
+                    .send_to_device(&to_device_id, Message::Text(relay_msg.to_json()?))
+                {
+                    warn!("ack target offline: {}", to_device_id);
+                }
+
+                return Ok(());
+            }
+
             if let Err(message) = validate_relay_payload(&payload) {
                 let error_response = ServerMessage::Error {
                     code: "INVALID_RELAY_PAYLOAD".to_string(),
@@ -406,15 +476,47 @@ async fn handle_message(
                 return Ok(());
             }
 
+            let sender_name = device_manager
+                .get_device(&from_device_id)
+                .map(|device| device.device_name)
+                .unwrap_or_else(|| from_device_id.clone());
+            let message_id = Uuid::new_v4().to_string();
+            let sent_at = payload
+                .get("timestamp")
+                .and_then(|value| value.as_i64())
+                .unwrap_or_else(|| chrono::Utc::now().timestamp_millis());
+            let stored_at = pairing_db.queue_relay_message(
+                &message_id,
+                &from_device_id,
+                &sender_name,
+                &to_device_id,
+                &payload,
+                sent_at,
+            )?;
+
             let relay_msg = ServerMessage::RelayMessage {
                 from_device_id: from_device_id.clone(),
                 to_device_id: to_device_id.clone(),
                 payload,
+                message_id: Some(message_id.clone()),
+                from_device_name: Some(sender_name),
+                stored_at: Some(stored_at),
+                delivery_mode: Some("live".to_string()),
             };
 
-            if !device_manager.send_to_device(&to_device_id, Message::Text(relay_msg.to_json()?)) {
-                warn!("relay target offline: {}", to_device_id);
+            let queued =
+                !device_manager.send_to_device(&to_device_id, Message::Text(relay_msg.to_json()?));
+            if queued {
+                warn!("relay target offline, queued message for {}", to_device_id);
             }
+
+            let stored_response = ServerMessage::RelayStored {
+                message_id,
+                to_device_id,
+                stored_at,
+                queued,
+            };
+            tx.send(Message::Text(stored_response.to_json()?))?;
         }
 
         ServerMessage::NotificationForward {
@@ -485,7 +587,9 @@ async fn handle_message(
                 nonce,
             };
 
-            if !device_manager.send_to_device(&to_device_id, Message::Text(encrypted_msg.to_json()?)) {
+            if !device_manager
+                .send_to_device(&to_device_id, Message::Text(encrypted_msg.to_json()?))
+            {
                 warn!("encrypted target offline: {}", to_device_id);
             }
         }
@@ -496,6 +600,39 @@ async fn handle_message(
     }
 
     Ok(())
+}
+
+fn deliver_pending_messages(
+    device_id: &str,
+    device_manager: &DeviceManager,
+    pairing_db: &PairingDb,
+) -> Result<usize> {
+    let pending_messages = pairing_db.get_pending_messages(device_id)?;
+    let mut delivered = 0;
+
+    for pending in pending_messages {
+        let relay_msg = ServerMessage::RelayMessage {
+            from_device_id: pending.from_device_id,
+            to_device_id: pending.to_device_id,
+            payload: pending.payload,
+            message_id: Some(pending.message_id),
+            from_device_name: Some(pending.from_device_name),
+            stored_at: Some(pending.stored_at),
+            delivery_mode: Some("offline_sync".to_string()),
+        };
+
+        if !device_manager.send_to_device(device_id, Message::Text(relay_msg.to_json()?)) {
+            break;
+        }
+
+        delivered += 1;
+    }
+
+    if delivered > 0 {
+        info!("delivered {} pending messages to {}", delivered, device_id);
+    }
+
+    Ok(delivered)
 }
 
 fn validate_relay_payload(payload: &serde_json::Value) -> std::result::Result<(), String> {
@@ -544,7 +681,11 @@ async fn heartbeat_checker(device_manager: Arc<DeviceManager>, pairing_db: Arc<P
     }
 }
 
-fn notify_paired_devices_offline(device_id: &str, device_manager: &DeviceManager, pairing_db: &PairingDb) {
+fn notify_paired_devices_offline(
+    device_id: &str,
+    device_manager: &DeviceManager,
+    pairing_db: &PairingDb,
+) {
     let paired_ids = pairing_db.get_paired_devices(device_id).unwrap_or_default();
     let device_info = device_manager.unregister_device(device_id);
 

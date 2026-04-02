@@ -30,15 +30,15 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.Cloud
 import androidx.compose.material.icons.filled.Computer
-import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.QrCodeScanner
 import androidx.compose.material.icons.filled.Refresh
-import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Wifi
 import androidx.compose.material3.AlertDialog
@@ -53,6 +53,8 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -64,6 +66,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -78,26 +81,31 @@ import com.voiceinput.ui.components.HistoryItemView
 import com.voiceinput.ui.components.InputField
 import com.voiceinput.viewmodel.InputViewModel
 import java.io.File
+import kotlinx.coroutines.flow.collectLatest
 
 @OptIn(ExperimentalAnimationApi::class, ExperimentalMaterial3Api::class)
 @Composable
 fun InputScreen(
     viewModel: InputViewModel = viewModel(),
     onNavigateToSettings: () -> Unit = {},
-    onNavigateToScanner: () -> Unit = {}
+    onNavigateToScanner: () -> Unit = {},
+    onNavigateToHistory: () -> Unit = {}
 ) {
     val connectionStatus by viewModel.connectionStatus.collectAsState()
-    val historyItems by viewModel.historyItems.collectAsState()
+    val sendAvailable by viewModel.sendAvailable.collectAsState()
+    val historyItems by viewModel.visibleHistoryItems.collectAsState()
+    val historyHasMore by viewModel.historyHasMore.collectAsState()
+    val historyLoadingMore by viewModel.historyLoadingMore.collectAsState()
+    val historyInitialLoaded by viewModel.historyInitialLoaded.collectAsState()
     val inputText by viewModel.inputText.collectAsState()
-    val discoveredDevices by viewModel.discoveredDevices.collectAsState()
     val serverDevices by viewModel.serverDevices.collectAsState()
-    val serverConnectionState by viewModel.serverConnectionState.collectAsState()
     val pairedDevices by viewModel.pairedDevices.collectAsState()
     var showDeviceDialog by remember { mutableStateOf(false) }
-    var showSearchDialog by remember { mutableStateOf(false) }
-    var showClearHistoryDialog by remember { mutableStateOf(false) }
     val context = LocalContext.current
+    val snackbarHostState = remember { SnackbarHostState() }
     var pendingCameraUri by remember { mutableStateOf<Uri?>(null) }
+    val listState = rememberLazyListState()
+    var initialScrollCompleted by remember { mutableStateOf(false) }
 
     val imagePickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.PickVisualMedia()
@@ -118,10 +126,60 @@ fun InputScreen(
     }
 
     LaunchedEffect(Unit) {
+        viewModel.loadInitialVisibleHistory()
         viewModel.startDiscovery()
     }
 
-    val isServerConnected = serverConnectionState is ServerConnection.ConnectionState.Connected
+    LaunchedEffect(Unit) {
+        viewModel.uiMessages.collectLatest { message ->
+            snackbarHostState.showSnackbar(message)
+        }
+    }
+
+    LaunchedEffect(historyInitialLoaded, historyItems.size) {
+        if (!historyInitialLoaded) {
+            return@LaunchedEffect
+        }
+
+        if (historyItems.isEmpty()) {
+            initialScrollCompleted = false
+            return@LaunchedEffect
+        }
+
+        if (!initialScrollCompleted) {
+            listState.scrollToItem(historyItems.lastIndex)
+            initialScrollCompleted = true
+        }
+    }
+
+    LaunchedEffect(
+        listState,
+        historyInitialLoaded,
+        historyItems.size,
+        historyHasMore,
+        historyLoadingMore
+    ) {
+        if (!historyInitialLoaded) {
+            return@LaunchedEffect
+        }
+
+        snapshotFlow {
+            listState.firstVisibleItemIndex == 0 &&
+                listState.firstVisibleItemScrollOffset == 0
+        }.collectLatest { reachedTop ->
+            if (
+                reachedTop &&
+                historyItems.isNotEmpty() &&
+                historyHasMore &&
+                !historyLoadingMore
+            ) {
+                val insertedCount = viewModel.loadOlderVisibleHistory()
+                if (insertedCount > 0) {
+                    listState.scrollToItem(insertedCount)
+                }
+            }
+        }
+    }
 
     Scaffold(
         topBar = {
@@ -136,31 +194,12 @@ fun InputScreen(
                     }
                 },
                 actions = {
-                    AnimatedVisibility(
-                        visible = historyItems.isNotEmpty(),
-                        enter = fadeIn() + expandHorizontally(),
-                        exit = fadeOut() + shrinkHorizontally()
-                    ) {
-                        IconButton(onClick = { showSearchDialog = true }) {
-                            Icon(
-                                Icons.Default.Search,
-                                contentDescription = "搜索",
-                                tint = MaterialTheme.colorScheme.onPrimary
-                            )
-                        }
-                    }
-                    AnimatedVisibility(
-                        visible = historyItems.isNotEmpty(),
-                        enter = fadeIn() + expandHorizontally(),
-                        exit = fadeOut() + shrinkHorizontally()
-                    ) {
-                        IconButton(onClick = { showClearHistoryDialog = true }) {
-                            Icon(
-                                Icons.Default.Delete,
-                                contentDescription = "清空历史",
-                                tint = MaterialTheme.colorScheme.onPrimary
-                            )
-                        }
+                    IconButton(onClick = onNavigateToHistory) {
+                        Icon(
+                            Icons.Default.History,
+                            contentDescription = "历史记录",
+                            tint = MaterialTheme.colorScheme.onPrimary
+                        )
                     }
                     AnimatedVisibility(
                         visible = !connectionStatus.connected,
@@ -188,7 +227,8 @@ fun InputScreen(
                     titleContentColor = MaterialTheme.colorScheme.onPrimary
                 )
             )
-        }
+        },
+        snackbarHost = { SnackbarHost(snackbarHostState) }
     ) { paddingValues ->
         Column(
             modifier = Modifier
@@ -215,14 +255,18 @@ fun InputScreen(
                             horizontalAlignment = Alignment.CenterHorizontally,
                             verticalArrangement = Arrangement.spacedBy(16.dp)
                         ) {
-                            if (connectionStatus.connected) {
+                            if (sendAvailable) {
                                 Text(
-                                    text = "已连接",
+                                    text = if (connectionStatus.connected) "已连接" else "离线消息可暂存",
                                     style = MaterialTheme.typography.titleMedium,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                                 Text(
-                                    text = "在手机上输入文字或发送图片到电脑",
+                                    text = if (connectionStatus.connected) {
+                                        "在手机上输入文字或发送图片到电脑"
+                                    } else {
+                                        "电脑离线时，消息会先保存到服务器，待电脑上线后同步"
+                                    },
                                     style = MaterialTheme.typography.bodyMedium,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
@@ -254,10 +298,24 @@ fun InputScreen(
                     }
                 } else {
                     LazyColumn(
+                        state = listState,
                         modifier = Modifier.fillMaxWidth(),
                         contentPadding = PaddingValues(16.dp),
                         verticalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
+                        if (historyLoadingMore) {
+                            item(key = "history-loading") {
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(vertical = 8.dp),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    CircularProgressIndicator(modifier = Modifier.size(20.dp))
+                                }
+                            }
+                        }
+
                         items(
                             items = historyItems,
                             key = { it.id }
@@ -299,7 +357,7 @@ fun InputScreen(
                         pendingCameraUri = outputUri
                         cameraLauncher.launch(outputUri)
                     },
-                    enabled = connectionStatus.connected,
+                    enabled = sendAvailable,
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(16.dp)
@@ -327,44 +385,6 @@ fun InputScreen(
         )
     }
 
-    if (showSearchDialog) {
-        SearchHistoryDialog(
-            onSearch = { query ->
-                if (query.isBlank()) {
-                    viewModel.reloadHistory()
-                } else {
-                    viewModel.searchHistory(query)
-                }
-            },
-            onDismiss = {
-                viewModel.reloadHistory()
-                showSearchDialog = false
-            }
-        )
-    }
-
-    if (showClearHistoryDialog) {
-        AlertDialog(
-            onDismissRequest = { showClearHistoryDialog = false },
-            title = { Text("清空历史记录") },
-            text = { Text("确定要清空所有历史记录吗？此操作不可恢复。") },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        viewModel.clearAllHistory()
-                        showClearHistoryDialog = false
-                    }
-                ) {
-                    Text("确定", color = MaterialTheme.colorScheme.error)
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { showClearHistoryDialog = false }) {
-                    Text("取消")
-                }
-            }
-        )
-    }
 }
 
 private fun createCameraOutputUri(context: Context): Uri {

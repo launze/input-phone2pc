@@ -24,24 +24,13 @@ pub enum Message {
         pin: String,
     },
     #[serde(rename = "PAIR_RESPONSE")]
-    PairResponse {
-        success: bool,
-        message: String,
-    },
+    PairResponse { success: bool, message: String },
     #[serde(rename = "TEXT_INPUT")]
-    TextInput {
-        text: String,
-        timestamp: i64,
-    },
+    TextInput { text: String, timestamp: i64 },
     #[serde(rename = "INPUT_ACK")]
-    InputAck {
-        success: bool,
-        timestamp: i64,
-    },
+    InputAck { success: bool, timestamp: i64 },
     #[serde(rename = "HEARTBEAT")]
-    Heartbeat {
-        timestamp: i64,
-    },
+    Heartbeat { timestamp: i64 },
     #[serde(rename = "ENCRYPTION_KEY_EXCHANGE")]
     EncryptionKeyExchange {
         device_id: String,

@@ -11,25 +11,23 @@ pub enum ServerMessage {
         device_type: String, // "android" | "desktop"
         version: String,
     },
-    
+
     #[serde(rename = "SERVER_REGISTER_RESPONSE")]
     ServerRegisterResponse {
         success: bool,
         session_id: String,
         message: String,
     },
-    
+
     // 设备列表
     #[serde(rename = "DEVICE_LIST_REQUEST")]
     DeviceListRequest {
         device_type: Option<String>, // "desktop" | "android" | "all"
     },
-    
+
     #[serde(rename = "DEVICE_LIST_RESPONSE")]
-    DeviceListResponse {
-        devices: Vec<DeviceInfo>,
-    },
-    
+    DeviceListResponse { devices: Vec<DeviceInfo> },
+
     // 服务器配对
     #[serde(rename = "SERVER_PAIR_REQUEST")]
     ServerPairRequest {
@@ -38,7 +36,7 @@ pub enum ServerMessage {
         to_device_id: String,
         pin: String,
     },
-    
+
     #[serde(rename = "SERVER_PAIR_RESPONSE")]
     ServerPairResponse {
         success: bool,
@@ -48,15 +46,31 @@ pub enum ServerMessage {
         to_device_name: String,
         message: String,
     },
-    
+
     // 消息中转
     #[serde(rename = "RELAY_MESSAGE")]
     RelayMessage {
         from_device_id: String,
         to_device_id: String,
         payload: serde_json::Value,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        message_id: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        from_device_name: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        stored_at: Option<i64>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        delivery_mode: Option<String>, // "live" | "offline_sync"
     },
-    
+
+    #[serde(rename = "RELAY_STORED")]
+    RelayStored {
+        message_id: String,
+        to_device_id: String,
+        stored_at: i64,
+        queued: bool,
+    },
+
     // 通知转发
     #[serde(rename = "NOTIFICATION_FORWARD")]
     NotificationForward {
@@ -64,20 +78,15 @@ pub enum ServerMessage {
         to_device_id: String,
         notification: NotificationData,
     },
-    
+
     // 心跳
     #[serde(rename = "HEARTBEAT")]
-    Heartbeat {
-        timestamp: i64,
-    },
-    
+    Heartbeat { timestamp: i64 },
+
     // 错误消息
     #[serde(rename = "ERROR")]
-    Error {
-        code: String,
-        message: String,
-    },
-    
+    Error { code: String, message: String },
+
     // 配对设备上线通知
     #[serde(rename = "PAIRED_DEVICE_ONLINE")]
     PairedDeviceOnline {
@@ -113,9 +122,9 @@ pub enum ServerMessage {
     ImageMessage {
         from_device_id: String,
         to_device_id: String,
-        image_data: String, // base64 encoded
+        image_data: String,   // base64 encoded
         image_format: String, // "jpeg", "png", etc.
-        image_size: u32, // original size in bytes
+        image_size: u32,      // original size in bytes
         timestamp: i64,
     },
 
@@ -125,7 +134,7 @@ pub enum ServerMessage {
         device_id: String,
         public_key: String, // 用于密钥协商的公钥
     },
-    
+
     #[serde(rename = "ENCRYPTED_MESSAGE")]
     EncryptedMessage {
         from_device_id: String,

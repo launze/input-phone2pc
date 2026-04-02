@@ -1,13 +1,19 @@
-#![cfg_attr(all(target_os = "windows", not(debug_assertions)), windows_subsystem = "windows")]
+#![cfg_attr(
+    all(target_os = "windows", not(debug_assertions)),
+    windows_subsystem = "windows"
+)]
 
-mod network;
-mod input;
-mod pairing;
-mod storage;
 mod crypto;
+mod input;
+mod network;
+mod pairing;
+mod reporting;
+mod storage;
 
-use storage::config::AppConfig;
 use std::sync::Arc;
+use std::{fs, path::PathBuf};
+use storage::config::{AppConfig, OpenAiReportConfig};
+use storage::history::{self, HistoryPage, HistoryQuery, HistoryRecord};
 use tokio::sync::Mutex;
 
 // 全局服务器连接状态
@@ -57,7 +63,13 @@ async fn connect_server(url: String, app_handle: tauri::AppHandle) -> Result<(),
     let config = storage::config::AppConfig::load();
 
     // 连接并注册
-    network::connect_and_register(&url, &config.device_id, &config.device_name, Some(app_handle)).await;
+    network::connect_and_register(
+        &url,
+        &config.device_id,
+        &config.device_name,
+        Some(app_handle),
+    )
+    .await;
 
     // 检查连接状态
     let ws_client = network::websocket::get_ws_client();
@@ -78,16 +90,16 @@ async fn connect_server(url: String, app_handle: tauri::AppHandle) -> Result<(),
 #[tauri::command]
 async fn disconnect_server() -> Result<(), String> {
     println!("🔌 断开服务器连接");
-    
+
     // 断开 WebSocket 连接
     let ws_client = network::websocket::get_ws_client();
     let mut client = ws_client.lock().await;
     client.disconnect().await;
-    
+
     let mut state = SERVER_STATE.lock().await;
     state.connected = false;
     state.error = None;
-    
+
     Ok(())
 }
 
@@ -97,15 +109,26 @@ struct ServerStatus {
     error: Option<String>,
 }
 
+#[derive(serde::Serialize)]
+struct HistoryExportPayload {
+    filename: String,
+    saved_path: String,
+}
+
+#[derive(serde::Serialize)]
+struct OpenAiConfigSavePayload {
+    success: bool,
+}
+
 #[tauri::command]
 async fn get_server_status() -> ServerStatus {
     // 检查 WebSocket 实际连接状态
     let ws_client = network::websocket::get_ws_client();
     let client = ws_client.lock().await;
     let ws_connected = client.is_connected().await;
-    
+
     let mut state = SERVER_STATE.lock().await;
-    
+
     // 同步状态
     if state.connected != ws_connected {
         state.connected = ws_connected;
@@ -113,11 +136,150 @@ async fn get_server_status() -> ServerStatus {
             state.error = Some("连接已断开".to_string());
         }
     }
-    
+
     ServerStatus {
         connected: state.connected,
         error: state.error.clone(),
     }
+}
+
+#[tauri::command]
+fn get_message_history(
+    start_at: Option<i64>,
+    end_at: Option<i64>,
+    limit: Option<usize>,
+) -> Result<Vec<HistoryRecord>, String> {
+    history::list_records(HistoryQuery {
+        start_at,
+        end_at,
+        limit,
+        before_received_at: None,
+        before_id: None,
+    })
+    .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn get_message_history_page(
+    start_at: Option<i64>,
+    end_at: Option<i64>,
+    limit: Option<usize>,
+    before_received_at: Option<i64>,
+    before_id: Option<String>,
+) -> Result<HistoryPage, String> {
+    history::list_record_page(HistoryQuery {
+        start_at,
+        end_at,
+        limit,
+        before_received_at,
+        before_id,
+    })
+    .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn clear_message_history() -> Result<(), String> {
+    history::clear_records().map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn export_message_history(
+    start_at: Option<i64>,
+    end_at: Option<i64>,
+    label: Option<String>,
+) -> Result<HistoryExportPayload, String> {
+    let csv = history::export_csv(HistoryQuery {
+        start_at,
+        end_at,
+        limit: None,
+        before_received_at: None,
+        before_id: None,
+    })
+    .map_err(|e| e.to_string())?;
+
+    let suffix = label
+        .unwrap_or_else(|| "custom".to_string())
+        .replace(' ', "_")
+        .replace(':', "-");
+    let filename = format!(
+        "voice-input-history-{}-{}.csv",
+        suffix,
+        chrono::Local::now().format("%Y%m%d-%H%M%S")
+    );
+    let saved_path = save_history_export(&filename, &csv)?;
+
+    Ok(HistoryExportPayload {
+        filename,
+        saved_path,
+    })
+}
+
+#[tauri::command]
+fn export_openai_report_word(
+    period: String,
+    title: String,
+    start_at: i64,
+    end_at: i64,
+    content: String,
+) -> Result<HistoryExportPayload, String> {
+    let bytes = reporting::export_report_to_word(&period, &title, start_at, end_at, &content)?;
+    let suffix = match period.as_str() {
+        "week" => "week-report",
+        "month" => "month-report",
+        _ => "report",
+    };
+    let filename = format!(
+        "voice-input-{}-{}.docx",
+        suffix,
+        chrono::Local::now().format("%Y%m%d-%H%M%S")
+    );
+    let saved_path = save_export_bytes(&filename, &bytes)?;
+
+    Ok(HistoryExportPayload {
+        filename,
+        saved_path,
+    })
+}
+
+#[tauri::command]
+fn save_openai_report_config(openai: OpenAiReportConfig) -> Result<OpenAiConfigSavePayload, String> {
+    let mut config = AppConfig::load();
+    config.set_openai_config(openai);
+    config.save().map_err(|e| e.to_string())?;
+    Ok(OpenAiConfigSavePayload { success: true })
+}
+
+#[tauri::command]
+async fn generate_openai_report(
+    period: String,
+    start_at: i64,
+    end_at: i64,
+) -> Result<reporting::GeneratedReport, String> {
+    let config = AppConfig::load();
+    reporting::generate_openai_report(config, &period, start_at, end_at).await
+}
+
+fn save_history_export(filename: &str, csv: &str) -> Result<String, String> {
+    let content = format!("\u{feff}{csv}");
+    save_export_bytes(filename, content.as_bytes())
+}
+
+fn save_export_bytes(filename: &str, bytes: &[u8]) -> Result<String, String> {
+    let export_dir = resolve_history_export_dir()?;
+    fs::create_dir_all(&export_dir).map_err(|e| e.to_string())?;
+
+    let output_path = export_dir.join(filename);
+    fs::write(&output_path, bytes).map_err(|e| e.to_string())?;
+
+    Ok(output_path.display().to_string())
+}
+
+fn resolve_history_export_dir() -> Result<PathBuf, String> {
+    dirs::download_dir()
+        .or_else(dirs::document_dir)
+        .or_else(dirs::desktop_dir)
+        .or_else(|| std::env::current_dir().ok())
+        .ok_or_else(|| "无法确定导出目录".to_string())
 }
 
 #[tauri::command]
@@ -129,13 +291,12 @@ async fn generate_encryption_key() -> Result<String, String> {
 #[tauri::command]
 async fn set_encryption_key(key: String) -> Result<(), String> {
     use crate::crypto::EncryptionKey;
-    let encryption_key = EncryptionKey::from_hex(&key)
-        .map_err(|e| e.to_string())?;
-    
+    let encryption_key = EncryptionKey::from_hex(&key).map_err(|e| e.to_string())?;
+
     // 设置到网络模块
     use crate::network::connection;
     connection::set_encryption_key(Some(encryption_key)).await;
-    
+
     println!("设置加密密钥成功");
     Ok(())
 }
@@ -160,7 +321,10 @@ async fn unpair_device(device_id: String) -> Result<(), String> {
             "from_device_id": my_device_id,
             "to_device_id": device_id
         });
-        client.send(&msg.to_string()).await.map_err(|e| e.to_string())?;
+        client
+            .send(&msg.to_string())
+            .await
+            .map_err(|e| e.to_string())?;
     }
 
     // 从本地配置移除
@@ -188,10 +352,11 @@ fn generate_pairing_qr() -> Result<String, String> {
     let qr_json = serde_json::to_string(&qr_data).map_err(|e| e.to_string())?;
 
     // Generate QR code
-    use qrcode::QrCode;
     use image::Luma;
+    use qrcode::QrCode;
     let code = QrCode::new(qr_json.as_bytes()).map_err(|e| e.to_string())?;
-    let img = code.render::<Luma<u8>>()
+    let img = code
+        .render::<Luma<u8>>()
         .quiet_zone(true)
         .min_dimensions(256, 256)
         .build();
@@ -219,6 +384,13 @@ pub fn run() {
             connect_server,
             disconnect_server,
             get_server_status,
+            get_message_history,
+            get_message_history_page,
+            clear_message_history,
+            export_message_history,
+            export_openai_report_word,
+            save_openai_report_config,
+            generate_openai_report,
             generate_encryption_key,
             set_encryption_key,
             send_encrypted_message,
@@ -227,14 +399,18 @@ pub fn run() {
         ])
         .setup(|app| {
             let app_handle = app.handle().clone();
-            
+
+            if let Err(error) = history::init() {
+                eprintln!("历史数据库初始化失败: {}", error);
+            }
+
             // 启动网络服务
             tauri::async_runtime::spawn(async move {
                 if let Err(e) = network::start_services(app_handle).await {
                     eprintln!("网络服务启动失败: {}", e);
                 }
             });
-            
+
             Ok(())
         })
         .run(tauri::generate_context!())
@@ -245,6 +421,6 @@ fn main() {
     // 初始化 Rustls 加密提供者
     use rustls::crypto::ring::default_provider;
     let _ = default_provider().install_default();
-    
+
     run();
 }

@@ -1,6 +1,6 @@
+use crate::storage::config::{AppConfig, PairedDevice};
 use std::sync::Arc;
 use tokio::sync::Mutex;
-use crate::storage::config::{AppConfig, PairedDevice};
 
 pub struct PairingManager {
     config: Arc<Mutex<AppConfig>>,
@@ -29,7 +29,11 @@ impl PairingManager {
 
     pub async fn get_device_name(&self, device_id: &str) -> Option<String> {
         let config = self.config.lock().await;
-        config.paired_devices.iter().find(|d| d.device_id == device_id).map(|d| d.device_name.clone())
+        config
+            .paired_devices
+            .iter()
+            .find(|d| d.device_id == device_id)
+            .map(|d| d.device_name.clone())
     }
 
     pub async fn remove_device(&self, device_id: &str) {

@@ -14,6 +14,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
+import com.voiceinput.ui.screens.HistoryScreen
 import com.voiceinput.ui.screens.InputScreen
 import com.voiceinput.ui.screens.QrScannerScreen
 import com.voiceinput.ui.screens.SettingsScreen
@@ -46,7 +47,15 @@ fun MainScreen() {
             InputScreen(
                 viewModel = viewModel,
                 onNavigateToSettings = { navController.navigate("settings") },
-                onNavigateToScanner = { navController.navigate("scanner") }
+                onNavigateToScanner = { navController.navigate("scanner") },
+                onNavigateToHistory = { navController.navigate("history") }
+            )
+        }
+
+        composable("history") {
+            HistoryScreen(
+                viewModel = viewModel,
+                onBack = { navController.popBackStack() }
             )
         }
 

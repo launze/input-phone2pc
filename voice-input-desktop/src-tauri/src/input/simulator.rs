@@ -52,8 +52,7 @@ fn set_image_clipboard(image_bytes: &[u8]) -> Result<(), String> {
         bytes: Cow::Owned(rgba.into_raw()),
     };
 
-    let mut clipboard = Clipboard::new()
-        .map_err(|e| format!("failed to open clipboard: {}", e))?;
+    let mut clipboard = Clipboard::new().map_err(|e| format!("failed to open clipboard: {}", e))?;
     clipboard
         .set_image(data)
         .map_err(|e| format!("failed to set clipboard image: {}", e))

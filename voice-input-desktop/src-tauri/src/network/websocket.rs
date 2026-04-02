@@ -1,18 +1,18 @@
 use anyhow::Result;
 use futures_util::{SinkExt, StreamExt};
-use std::sync::Arc;
-use tokio::sync::{mpsc, Mutex};
-use tokio_tungstenite::{connect_async_tls_with_config, tungstenite::Message, Connector};
-use tokio_tungstenite::tungstenite::client::IntoClientRequest;
-use rustls::ClientConfig;
-use std::sync::Arc as StdArc;
 use rustls::pki_types::CertificateDer;
-
-
+use rustls::ClientConfig;
+use std::sync::Arc;
+use std::sync::Arc as StdArc;
+use tokio::sync::{mpsc, Mutex};
+use tokio_tungstenite::tungstenite::client::IntoClientRequest;
+use tokio_tungstenite::{connect_async_tls_with_config, tungstenite::Message, Connector};
 
 pub struct WebSocketClient {
     sender: Option<mpsc::UnboundedSender<Message>>,
     connected: Arc<Mutex<bool>>,
+    url: Arc<Mutex<String>>,
+    reconnect_task: Arc<Mutex<Option<tokio::task::JoinHandle<()>>>>,
 }
 
 impl WebSocketClient {
@@ -20,10 +20,14 @@ impl WebSocketClient {
         Self {
             sender: None,
             connected: Arc::new(Mutex::new(false)),
+            url: Arc::new(Mutex::new(String::new())),
+            reconnect_task: Arc::new(Mutex::new(None)),
         }
     }
 
     pub async fn connect(&mut self, url: &str) -> Result<mpsc::UnboundedReceiver<String>> {
+        *self.url.lock().await = url.to_string();
+
         let (tx, rx) = mpsc::unbounded_channel::<String>();
         let (msg_tx, mut msg_rx) = mpsc::unbounded_channel::<Message>();
 
@@ -44,12 +48,8 @@ impl WebSocketClient {
         let connector = Connector::Rustls(StdArc::new(tls_config));
 
         // 连接 WebSocket
-        let (ws_stream, response) = connect_async_tls_with_config(
-            request,
-            None,
-            false,
-            Some(connector),
-        ).await?;
+        let (ws_stream, response) =
+            connect_async_tls_with_config(request, None, false, Some(connector)).await?;
         println!("✅ WebSocket 连接成功: {:?}", response.status());
 
         let (mut write, mut read) = ws_stream.split();
@@ -113,6 +113,11 @@ impl WebSocketClient {
         }
         self.sender = None;
         *self.connected.lock().await = false;
+
+        // 取消重连任务
+        if let Some(task) = self.reconnect_task.lock().await.take() {
+            task.abort();
+        }
     }
 }
 
@@ -158,7 +163,7 @@ impl EmbeddedCertificateVerifier {
         // 解析 PEM 格式的证书
         let mut cursor = std::io::Cursor::new(EMBEDDED_CERT_PEM);
         let mut certs = rustls_pemfile::certs(&mut cursor);
-        
+
         // 遍历证书迭代器，找到第一个有效证书
         while let Some(cert_result) = certs.next() {
             match cert_result {
@@ -166,7 +171,7 @@ impl EmbeddedCertificateVerifier {
                 Err(e) => return Err(format!("Failed to parse embedded certificate: {}", e).into()),
             }
         }
-        
+
         // 如果没有找到证书
         Err("No certificates found in embedded PEM".into())
     }
@@ -194,7 +199,9 @@ impl rustls::client::danger::ServerCertVerifier for EmbeddedCertificateVerifier 
             }
             Err(e) => {
                 eprintln!("❌ 无法加载嵌入的证书: {}", e);
-                Err(rustls::Error::General("Failed to load embedded certificate".to_string()))
+                Err(rustls::Error::General(
+                    "Failed to load embedded certificate".to_string(),
+                ))
             }
         }
     }
@@ -232,5 +239,3 @@ impl rustls::client::danger::ServerCertVerifier for EmbeddedCertificateVerifier 
         ]
     }
 }
-
-

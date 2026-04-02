@@ -23,7 +23,32 @@ document.addEventListener('DOMContentLoaded', async () => {
     const refreshQrBtn = document.getElementById('refresh-qr-btn');
     const historyList = document.getElementById('history-list');
     const historyEmpty = document.getElementById('history-empty');
+    const historyPagination = document.getElementById('history-pagination');
+    const historyPageHint = document.getElementById('history-page-hint');
+    const loadMoreHistoryBtn = document.getElementById('load-more-history-btn');
+    const exportWeekBtn = document.getElementById('export-week-btn');
+    const exportMonthBtn = document.getElementById('export-month-btn');
+    const exportStartDate = document.getElementById('export-start-date');
+    const exportEndDate = document.getElementById('export-end-date');
+    const exportRangeBtn = document.getElementById('export-range-btn');
     const clearHistoryBtn = document.getElementById('clear-history-btn');
+    const toggleAiPanelBtn = document.getElementById('toggle-ai-panel-btn');
+    const toggleAiSettingsBtn = document.getElementById('toggle-ai-settings-btn');
+    const aiReportPanel = document.getElementById('ai-report-panel');
+    const aiConfigCard = document.getElementById('ai-config-card');
+    const aiSetupHint = document.getElementById('ai-setup-hint');
+    const saveOpenAiConfigBtn = document.getElementById('save-openai-config-btn');
+    const openaiApiKeyInput = document.getElementById('openai-api-key');
+    const openaiApiUrlInput = document.getElementById('openai-api-url');
+    const openaiModelNameInput = document.getElementById('openai-model-name');
+    const weeklyPromptTemplateInput = document.getElementById('weekly-prompt-template');
+    const monthlyPromptTemplateInput = document.getElementById('monthly-prompt-template');
+    const generateWeeklyReportBtn = document.getElementById('generate-weekly-report-btn');
+    const generateMonthlyReportBtn = document.getElementById('generate-monthly-report-btn');
+    const aiReportStatus = document.getElementById('ai-report-status');
+    const aiReportOutput = document.getElementById('ai-report-output');
+    const copyAiReportBtn = document.getElementById('copy-ai-report-btn');
+    const exportAiReportWordBtn = document.getElementById('export-ai-report-word-btn');
 
     let connectedDeviceId = null;
     let pairedDeviceId = null;      // 配对设备 ID
@@ -31,6 +56,18 @@ document.addEventListener('DOMContentLoaded', async () => {
     let isPaired = false;        // 已配对（有配对设备记录）
     let isDeviceOnline = false;  // 配对设备在线
     let serverStatus = 'disconnected';
+    let serverReconnectTimer = null;
+    let serverConnectInFlight = false;
+    const HISTORY_PAGE_SIZE = 100;
+    const HISTORY_TOP_THRESHOLD = 24;
+    let historyRecords = [];
+    let historyHasMore = false;
+    let historyLoading = false;
+    let historyInitialLoaded = false;
+    let historyCursor = null;
+    let aiReportBusy = false;
+    let currentAiReport = null;
+    let aiConfigured = false;
 
     // ===== 视图切换 =====
     function switchToHistoryView() {
@@ -43,6 +80,233 @@ document.addEventListener('DOMContentLoaded', async () => {
         historySection.style.display = 'none';
         if (serverStatus === 'connected') {
             loadQrCode();
+        }
+    }
+
+    function normalizeOpenAiConfig(openai = {}) {
+        return {
+            api_key: (openai.api_key || openai.apiKey || '').trim(),
+            api_url: (openai.api_url || openai.apiUrl || '').trim(),
+            model_name: (openai.model_name || openai.modelName || '').trim(),
+            weekly_prompt_template: openai.weekly_prompt_template || openai.weeklyPromptTemplate || '',
+            monthly_prompt_template: openai.monthly_prompt_template || openai.monthlyPromptTemplate || ''
+        };
+    }
+
+    function hasConfiguredOpenAi(openai = {}) {
+        const normalized = normalizeOpenAiConfig(openai);
+        return Boolean(
+            normalized.api_key &&
+            normalized.model_name &&
+            normalized.weekly_prompt_template.trim() &&
+            normalized.monthly_prompt_template.trim()
+        );
+    }
+
+    function syncAiPanelUi() {
+        const panelOpen = aiReportPanel.style.display !== 'none';
+        const settingsOpen = aiConfigCard.style.display !== 'none';
+        toggleAiPanelBtn.classList.toggle('active', panelOpen);
+        toggleAiSettingsBtn.classList.toggle('active', panelOpen && settingsOpen);
+        aiReportPanel.classList.toggle('settings-hidden', !settingsOpen);
+        aiSetupHint.textContent = aiConfigured
+            ? '基于本地历史记录生成周报或月报，支持导出为 Word。'
+            : '请先完成 AI 配置。阿里云百炼兼容模式可填写 https://dashscope.aliyuncs.com/compatible-mode/v1。';
+    }
+
+    function setAiSettingsVisible(visible) {
+        aiConfigCard.style.display = visible ? 'flex' : 'none';
+        syncAiPanelUi();
+    }
+
+    function toggleAiPanel(forceOpen, { revealSettings = null } = {}) {
+        const shouldOpen = typeof forceOpen === 'boolean'
+            ? forceOpen
+            : aiReportPanel.style.display === 'none';
+        aiReportPanel.style.display = shouldOpen ? 'grid' : 'none';
+        if (!shouldOpen) {
+            setAiSettingsVisible(false);
+            syncAiPanelUi();
+            return;
+        }
+
+        const nextRevealSettings = revealSettings ?? !aiConfigured;
+        setAiSettingsVisible(nextRevealSettings);
+        syncAiPanelUi();
+    }
+
+    function populateOpenAiConfig(openai = {}) {
+        const normalized = normalizeOpenAiConfig(openai);
+        openaiApiKeyInput.value = normalized.api_key;
+        openaiApiUrlInput.value = normalized.api_url || 'https://api.openai.com/v1/responses';
+        openaiModelNameInput.value = normalized.model_name || 'gpt-5-mini';
+        weeklyPromptTemplateInput.value = normalized.weekly_prompt_template;
+        monthlyPromptTemplateInput.value = normalized.monthly_prompt_template;
+    }
+
+    function collectOpenAiConfigFromForm() {
+        return {
+            api_key: openaiApiKeyInput.value.trim(),
+            api_url: openaiApiUrlInput.value.trim(),
+            model_name: openaiModelNameInput.value.trim(),
+            weekly_prompt_template: weeklyPromptTemplateInput.value,
+            monthly_prompt_template: monthlyPromptTemplateInput.value
+        };
+    }
+
+    function setAiReportStatus(message, tone = '') {
+        aiReportStatus.textContent = message || '';
+        aiReportStatus.className = 'ai-report-status';
+        if (tone) {
+            aiReportStatus.classList.add(tone);
+        }
+    }
+
+    function refreshAiConfigurationState(openai = collectOpenAiConfigFromForm()) {
+        aiConfigured = hasConfiguredOpenAi(openai);
+        syncAiPanelUi();
+        return aiConfigured;
+    }
+
+    function setAiReportBusy(busy, actionLabel = '处理中') {
+        aiReportBusy = busy;
+        const busyText = `${actionLabel}...`;
+        saveOpenAiConfigBtn.disabled = busy;
+        generateWeeklyReportBtn.disabled = busy;
+        generateMonthlyReportBtn.disabled = busy;
+        copyAiReportBtn.disabled = busy;
+        exportAiReportWordBtn.disabled = busy || !aiReportOutput.value.trim();
+        if (busy) {
+            generateWeeklyReportBtn.textContent = busyText;
+            generateMonthlyReportBtn.textContent = busyText;
+        } else {
+            generateWeeklyReportBtn.textContent = '生成周报';
+            generateMonthlyReportBtn.textContent = '生成月报';
+        }
+    }
+
+    async function saveOpenAiConfig({ silent = false } = {}) {
+        const openai = collectOpenAiConfigFromForm();
+        await invoke('save_openai_report_config', { openai });
+        refreshAiConfigurationState(openai);
+        if (!silent) {
+            setAiReportStatus('OpenAI 配置已保存', 'success');
+        }
+    }
+
+    function ensureAiConfigured(actionLabel) {
+        if (refreshAiConfigurationState()) {
+            return true;
+        }
+
+        toggleAiPanel(true, { revealSettings: true });
+        setAiReportStatus(`请先完成 AI 配置后再${actionLabel}`, 'error');
+        alert(`请先完成 AI 配置后再${actionLabel}`);
+        return false;
+    }
+
+    async function generateAiReport(period) {
+        if (aiReportBusy) return;
+
+        const isWeek = period === 'week';
+        const actionLabel = isWeek ? '生成周报' : '生成月报';
+        if (!ensureAiConfigured(actionLabel)) {
+            return;
+        }
+        try {
+            setAiReportBusy(true, actionLabel);
+            setAiReportStatus(`${actionLabel}中，请稍候...`);
+            await saveOpenAiConfig({ silent: true });
+
+            const startAt = isWeek ? getStartOfWeek().getTime() : getStartOfMonth().getTime();
+            const endAt = Date.now();
+            const report = await invoke('generate_openai_report', {
+                period,
+                startAt,
+                endAt
+            });
+
+            aiReportOutput.value = report?.content || '';
+            currentAiReport = {
+                period,
+                startAt,
+                endAt,
+                title: isWeek ? '工作周报' : '工作月报'
+            };
+            toggleAiPanel(true, { revealSettings: false });
+            const total = report?.record_count ?? report?.recordCount ?? 0;
+            const used = report?.used_record_count ?? report?.usedRecordCount ?? total;
+            setAiReportStatus(
+                used < total
+                    ? `${actionLabel}已生成，使用 ${used}/${total} 条记录`
+                    : `${actionLabel}已生成，共使用 ${total} 条记录`,
+                'success'
+            );
+            exportAiReportWordBtn.disabled = !aiReportOutput.value.trim();
+        } catch (error) {
+            console.error(`❌ ${actionLabel}失败:`, error);
+            const message = typeof error === 'string' ? error : error?.message || '生成失败';
+            setAiReportStatus(message, 'error');
+            alert(`${actionLabel}失败：${message}`);
+        } finally {
+            setAiReportBusy(false);
+        }
+    }
+
+    async function copyAiReport() {
+        const content = aiReportOutput.value.trim();
+        if (!content) {
+            setAiReportStatus('当前没有可复制的报告内容', 'error');
+            return;
+        }
+
+        try {
+            if (navigator.clipboard?.writeText) {
+                await navigator.clipboard.writeText(content);
+            } else {
+                aiReportOutput.select();
+                document.execCommand('copy');
+            }
+            setAiReportStatus('报告内容已复制到剪贴板', 'success');
+        } catch (error) {
+            console.error('❌ 复制报告失败:', error);
+            setAiReportStatus('复制失败，请手动选择文本复制', 'error');
+        }
+    }
+
+    async function exportAiReportWord() {
+        const content = aiReportOutput.value.trim();
+        if (!content) {
+            setAiReportStatus('当前没有可导出的报告内容', 'error');
+            return;
+        }
+        if (!currentAiReport) {
+            setAiReportStatus('请先生成周报或月报，再导出 Word', 'error');
+            return;
+        }
+
+        try {
+            setAiReportBusy(true, '导出 Word');
+            setAiReportStatus('正在导出 Word，请稍候...');
+            const result = await invoke('export_openai_report_word', {
+                period: currentAiReport.period,
+                title: currentAiReport.title,
+                startAt: currentAiReport.startAt,
+                endAt: currentAiReport.endAt,
+                content
+            });
+            const savedPath = result?.saved_path || result?.savedPath;
+            setAiReportStatus(savedPath ? `Word 已导出到：${savedPath}` : 'Word 已导出', 'success');
+            if (savedPath) {
+                alert(`Word 导出完成：\n${savedPath}`);
+            }
+        } catch (error) {
+            console.error('❌ 导出 Word 失败:', error);
+            const message = typeof error === 'string' ? error : error?.message || '导出失败';
+            setAiReportStatus(message, 'error');
+            alert(`导出 Word 失败：${message}`);
+        } finally {
+            setAiReportBusy(false);
         }
     }
 
@@ -61,12 +325,42 @@ document.addEventListener('DOMContentLoaded', async () => {
         if (status !== 'connected') {
             qrArea.style.display = 'none';
         }
+
+        if (status === 'connected') {
+            clearServerReconnectTimer();
+        }
+    }
+
+    function clearServerReconnectTimer() {
+        if (serverReconnectTimer) {
+            clearTimeout(serverReconnectTimer);
+            serverReconnectTimer = null;
+        }
+    }
+
+    function scheduleServerReconnect(delayMs = 3000) {
+        if (!serverModeToggle.checked) return;
+        if (serverConnectInFlight || serverStatus === 'connected' || serverStatus === 'connecting') return;
+
+        const url = serverUrlInput.value.trim();
+        if (!url) return;
+
+        clearServerReconnectTimer();
+        serverReconnectTimer = setTimeout(() => {
+            serverReconnectTimer = null;
+            if (!serverModeToggle.checked || serverConnectInFlight || serverStatus === 'connected') {
+                return;
+            }
+            doConnectServer(url);
+        }, delayMs);
     }
 
     // ===== 连接服务器 =====
     async function doConnectServer(url) {
-        if (!url) return;
+        if (!url || serverConnectInFlight) return;
         try {
+            serverConnectInFlight = true;
+            clearServerReconnectTimer();
             setServerDot('connecting');
             await invoke('connect_server', { url });
             console.log('✅ 连接请求已发送');
@@ -76,6 +370,9 @@ document.addEventListener('DOMContentLoaded', async () => {
         } catch (error) {
             console.error('❌ 连接服务器失败:', error);
             setServerDot('error');
+            scheduleServerReconnect();
+        } finally {
+            serverConnectInFlight = false;
         }
     }
 
@@ -137,13 +434,21 @@ document.addEventListener('DOMContentLoaded', async () => {
         tauriEvent.listen('text_received', (event) => {
             console.log('📝 收到文字事件:', JSON.stringify(event));
             const text = event.payload?.text || '';
-            if (text) {
-                addHistoryItem(text);
-                // 收到文字说明设备在线，如果状态还没更新就补上
-                if (!isDeviceOnline) {
-                    onDeviceConnected(deviceNameEl.textContent || 'Android设备', connectedDeviceId);
-                }
+            const deliveryMode = event.payload?.delivery_mode || 'live';
+            if (text && deliveryMode !== 'offline_sync' && !isDeviceOnline) {
+                onDeviceConnected(deviceNameEl.textContent || 'Android设备', connectedDeviceId);
             }
+        });
+
+        tauriEvent.listen('history_recorded', (event) => {
+            console.log('🗂️ 历史记录已持久化:', JSON.stringify(event));
+            if (event.payload) {
+                addOrUpdateHistoryRecord(event.payload);
+            }
+        });
+
+        tauriEvent.listen('relay_stored', (event) => {
+            console.log('📥 服务器已暂存消息:', JSON.stringify(event));
         });
 
         // 监听配对成功事件
@@ -172,10 +477,25 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     // ===== 2. 加载配置 =====
     try {
+        await loadHistory();
         const config = await invoke('get_config');
         console.log('📋 配置已加载:', config);
         serverModeToggle.checked = config.server_mode_enabled;
         serverUrlInput.value = config.server_url;
+        const openaiConfig = config.openai || {};
+        populateOpenAiConfig(openaiConfig);
+        refreshAiConfigurationState(openaiConfig);
+        exportAiReportWordBtn.disabled = true;
+        if (aiConfigured) {
+            setAiReportStatus('');
+            toggleAiPanel(false);
+        } else {
+            toggleAiPanel(true, { revealSettings: true });
+            setAiReportStatus(
+                '请先填写 AI 配置后再生成报告。阿里云百炼兼容模式可直接填写 https://dashscope.aliyuncs.com/compatible-mode/v1',
+                'error'
+            );
+        }
 
         // 检查是否已有配对设备
         if (config.paired_devices && config.paired_devices.length > 0) {
@@ -206,6 +526,7 @@ document.addEventListener('DOMContentLoaded', async () => {
                 const url = serverUrlInput.value.trim();
                 if (url) doConnectServer(url);
             } else {
+                clearServerReconnectTimer();
                 await invoke('disconnect_server');
                 setServerDot('disconnected');
                 urlBar.style.display = 'none';
@@ -224,12 +545,54 @@ document.addEventListener('DOMContentLoaded', async () => {
         if (!showing) serverUrlInput.focus();
     });
 
+    toggleAiPanelBtn.addEventListener('click', () => {
+        const panelOpen = aiReportPanel.style.display !== 'none';
+        if (panelOpen) {
+            toggleAiPanel(false);
+            return;
+        }
+        toggleAiPanel(true, { revealSettings: !aiConfigured });
+    });
+
+    toggleAiSettingsBtn.addEventListener('click', () => {
+        const panelOpen = aiReportPanel.style.display !== 'none';
+        const settingsOpen = aiConfigCard.style.display !== 'none';
+        if (!panelOpen) {
+            toggleAiPanel(true, { revealSettings: true });
+            return;
+        }
+        setAiSettingsVisible(!settingsOpen);
+    });
+
+    saveOpenAiConfigBtn.addEventListener('click', async () => {
+        try {
+            await saveOpenAiConfig();
+        } catch (error) {
+            console.error('❌ 保存 OpenAI 配置失败:', error);
+            const message = typeof error === 'string' ? error : error?.message || '保存失败';
+            setAiReportStatus(message, 'error');
+            alert(`保存 OpenAI 配置失败：${message}`);
+        }
+    });
+
+    aiReportOutput.addEventListener('input', () => {
+        exportAiReportWordBtn.disabled = aiReportBusy || !aiReportOutput.value.trim();
+    });
+
+    [openaiApiKeyInput, openaiApiUrlInput, openaiModelNameInput, weeklyPromptTemplateInput, monthlyPromptTemplateInput]
+        .forEach((element) => {
+            element.addEventListener('input', () => {
+                refreshAiConfigurationState();
+            });
+        });
+
     serverUrlInput.addEventListener('keydown', async (e) => {
         if (e.key === 'Enter') {
             const url = serverUrlInput.value.trim();
             if (!url) return;
             try {
                 await invoke('set_server_url', { url });
+                clearServerReconnectTimer();
                 await invoke('disconnect_server');
                 doConnectServer(url);
                 urlBar.style.display = 'none';
@@ -270,16 +633,47 @@ document.addEventListener('DOMContentLoaded', async () => {
     });
 
     // ===== 历史记录 =====
-    function addHistoryItem(text) {
-        historyEmpty.style.display = 'none';
-        const item = document.createElement('div');
-        item.className = 'history-item';
-        const time = new Date().toLocaleTimeString('zh-CN');
-        item.innerHTML = `<div class="history-text">${escapeHtml(text)}</div><div class="history-time">${time}</div>`;
-        if (historyList.firstChild) {
-            historyList.insertBefore(item, historyList.firstChild);
-        } else {
-            historyList.appendChild(item);
+    async function loadHistory() {
+        await loadHistoryPage({ reset: true });
+    }
+
+    async function loadHistoryPage({ reset = false } = {}) {
+        if (historyLoading) return;
+
+        try {
+            historyLoading = true;
+            updateHistoryPagination();
+            const scrollSnapshot = captureHistoryScrollSnapshot();
+
+            const page = await invoke('get_message_history_page', {
+                limit: HISTORY_PAGE_SIZE,
+                beforeReceivedAt: reset ? null : historyCursor?.received_at ?? null,
+                beforeId: reset ? null : historyCursor?.id ?? null
+            });
+            const pageRecords = Array.isArray(page?.records) ? page.records : [];
+
+            if (reset) {
+                historyRecords = pageRecords;
+            } else {
+                const existingIds = new Set(historyRecords.map(item => item.id));
+                historyRecords = historyRecords.concat(
+                    pageRecords.filter(item => !existingIds.has(item.id))
+                );
+            }
+
+            historyRecords.sort(compareHistoryRecord);
+            historyHasMore = Boolean(page?.has_more);
+            historyInitialLoaded = true;
+            refreshHistoryCursor();
+            renderHistory({
+                mode: reset ? 'reset' : 'append',
+                scrollSnapshot
+            });
+        } catch (error) {
+            console.error('❌ 加载历史记录失败:', error);
+        } finally {
+            historyLoading = false;
+            updateHistoryPagination();
         }
     }
 
@@ -289,8 +683,269 @@ document.addEventListener('DOMContentLoaded', async () => {
         return div.innerHTML;
     }
 
-    clearHistoryBtn.addEventListener('click', () => {
-        historyList.innerHTML = '<div class="history-empty" id="history-empty">等待手机发送文字...</div>';
+    function renderHistory({ mode = 'reset', scrollSnapshot = captureHistoryScrollSnapshot(), forceScrollTop = false } = {}) {
+        if (!historyRecords.length) {
+            historyList.innerHTML = '<div class="history-empty" id="history-empty">等待手机发送文字...</div>';
+            historyList.scrollTop = 0;
+            updateHistoryPagination();
+            return;
+        }
+
+        historyList.innerHTML = historyRecords.map(renderHistoryItem).join('');
+        restoreHistoryScroll(mode, scrollSnapshot, forceScrollTop);
+        updateHistoryPagination();
+    }
+
+    function renderHistoryItem(record) {
+        const sentAt = formatDateTime(record.sent_at);
+        const receivedAt = formatDateTime(record.received_at);
+        const offlineBadge = record.delivery_mode === 'offline_sync'
+            ? '<span class="history-badge offline">离线补发</span>'
+            : '';
+        const itemClass = record.delivery_mode === 'offline_sync'
+            ? 'history-item offline-sync'
+            : 'history-item';
+
+        return `
+            <div class="${itemClass}" data-record-id="${escapeHtml(record.id)}">
+                <div class="history-text">${escapeHtml(record.content)}</div>
+                <div class="history-time">
+                    <span>发送: ${escapeHtml(sentAt)}</span>
+                    <span>接收: ${escapeHtml(receivedAt)}</span>
+                </div>
+                <div class="history-meta">
+                    <span>来源: ${escapeHtml(record.from_device_name || record.from_device_id || '未知设备')}</span>
+                    <span>通道: ${escapeHtml(record.via)}</span>
+                    ${offlineBadge}
+                </div>
+            </div>
+        `;
+    }
+
+    function addOrUpdateHistoryRecord(record) {
+        const existingIndex = historyRecords.findIndex(item => item.id === record.id);
+        const scrollSnapshot = captureHistoryScrollSnapshot();
+        const shouldStickToTop = isHistoryNearTop();
+
+        historyRecords = historyRecords.filter(item => item.id !== record.id);
+        historyRecords.unshift(record);
+        historyRecords.sort(compareHistoryRecord);
+        refreshHistoryCursor();
+        renderHistory({
+            mode: existingIndex >= 0 ? 'update' : 'prepend',
+            scrollSnapshot,
+            forceScrollTop: shouldStickToTop
+        });
+    }
+
+    function compareHistoryRecord(a, b) {
+        const timeDiff = (b.received_at || 0) - (a.received_at || 0);
+        if (timeDiff !== 0) return timeDiff;
+        return String(b.id || '').localeCompare(String(a.id || ''));
+    }
+
+    function refreshHistoryCursor() {
+        const oldestRecord = historyRecords[historyRecords.length - 1];
+        historyCursor = oldestRecord ? {
+            id: oldestRecord.id,
+            received_at: oldestRecord.received_at
+        } : null;
+    }
+
+    function updateHistoryPagination() {
+        const hasRecords = historyRecords.length > 0;
+        const shouldShow = historyLoading || historyHasMore || hasRecords;
+        historyPagination.style.display = shouldShow ? 'flex' : 'none';
+
+        if (!shouldShow) {
+            historyPageHint.textContent = '';
+            loadMoreHistoryBtn.style.display = 'none';
+            loadMoreHistoryBtn.disabled = false;
+            loadMoreHistoryBtn.textContent = '加载更多';
+            return;
+        }
+
+        if (historyLoading) {
+            historyPageHint.textContent = hasRecords ? `已加载 ${historyRecords.length} 条，正在继续加载...` : '正在加载历史记录...';
+            loadMoreHistoryBtn.style.display = hasRecords ? 'inline-flex' : 'none';
+            loadMoreHistoryBtn.disabled = true;
+            loadMoreHistoryBtn.textContent = '加载中...';
+            return;
+        }
+
+        loadMoreHistoryBtn.disabled = false;
+        loadMoreHistoryBtn.textContent = '加载更多';
+        if (historyHasMore) {
+            historyPageHint.textContent = `已加载 ${historyRecords.length} 条记录`;
+            loadMoreHistoryBtn.style.display = 'inline-flex';
+        } else if (historyInitialLoaded && hasRecords) {
+            historyPageHint.textContent = `已显示全部 ${historyRecords.length} 条记录`;
+            loadMoreHistoryBtn.style.display = 'none';
+        } else {
+            historyPageHint.textContent = '';
+            loadMoreHistoryBtn.style.display = 'none';
+        }
+    }
+
+    function captureHistoryScrollSnapshot() {
+        return {
+            top: historyList.scrollTop,
+            height: historyList.scrollHeight
+        };
+    }
+
+    function restoreHistoryScroll(mode, scrollSnapshot, forceScrollTop) {
+        if (forceScrollTop) {
+            historyList.scrollTop = 0;
+            return;
+        }
+
+        if (!scrollSnapshot) {
+            return;
+        }
+
+        const nextHeight = historyList.scrollHeight;
+        if (mode === 'append' || mode === 'update') {
+            historyList.scrollTop = scrollSnapshot.top;
+            return;
+        }
+
+        if (mode === 'prepend') {
+            const delta = nextHeight - scrollSnapshot.height;
+            historyList.scrollTop = scrollSnapshot.top + Math.max(0, delta);
+            return;
+        }
+
+        historyList.scrollTop = 0;
+    }
+
+    function isHistoryNearTop() {
+        return historyList.scrollTop <= HISTORY_TOP_THRESHOLD;
+    }
+
+    function formatDateTime(timestamp) {
+        if (!timestamp) return '';
+        return new Date(timestamp).toLocaleString('zh-CN', { hour12: false });
+    }
+
+    function getStartOfWeek() {
+        const now = new Date();
+        const day = now.getDay() || 7;
+        const start = new Date(now);
+        start.setHours(0, 0, 0, 0);
+        start.setDate(now.getDate() - day + 1);
+        return start;
+    }
+
+    function getStartOfMonth() {
+        const now = new Date();
+        return new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0, 0);
+    }
+
+    function parseDateInput(dateValue) {
+        const [year, month, day] = dateValue.split('-').map(Number);
+        return new Date(year, month - 1, day, 0, 0, 0, 0);
+    }
+
+    function toRangeStart(dateValue) {
+        const date = parseDateInput(dateValue);
+        date.setHours(0, 0, 0, 0);
+        return date.getTime();
+    }
+
+    function toRangeEnd(dateValue) {
+        const date = parseDateInput(dateValue);
+        date.setHours(23, 59, 59, 999);
+        return date.getTime();
+    }
+
+    async function exportHistory(startAt, endAt, label) {
+        try {
+            const result = await invoke('export_message_history', {
+                startAt,
+                endAt,
+                label
+            });
+            const savedPath = result?.saved_path || result?.savedPath;
+            if (savedPath) {
+                alert(`导出完成：\n${savedPath}`);
+            } else {
+                alert(`导出完成：${result?.filename || '文件已生成'}`);
+            }
+        } catch (error) {
+            console.error('❌ 导出历史记录失败:', error);
+            alert('导出失败，请查看控制台日志');
+        }
+    }
+
+    clearHistoryBtn.addEventListener('click', async () => {
+        try {
+            await invoke('clear_message_history');
+            historyRecords = [];
+            historyHasMore = false;
+            historyInitialLoaded = true;
+            historyCursor = null;
+            renderHistory({ mode: 'reset' });
+        } catch (error) {
+            console.error('❌ 清空历史记录失败:', error);
+        }
+    });
+
+    loadMoreHistoryBtn.addEventListener('click', async () => {
+        if (!historyHasMore || historyLoading) return;
+        await loadHistoryPage();
+    });
+
+    historyList.addEventListener('scroll', () => {
+        if (!historyHasMore || historyLoading) return;
+
+        const nearBottom =
+            historyList.scrollTop + historyList.clientHeight >= historyList.scrollHeight - 120;
+        if (nearBottom) {
+            loadHistoryPage();
+        }
+    });
+
+    exportWeekBtn.addEventListener('click', async () => {
+        const start = getStartOfWeek();
+        await exportHistory(start.getTime(), Date.now(), 'week');
+    });
+
+    exportMonthBtn.addEventListener('click', async () => {
+        const start = getStartOfMonth();
+        await exportHistory(start.getTime(), Date.now(), 'month');
+    });
+
+    generateWeeklyReportBtn.addEventListener('click', async () => {
+        await generateAiReport('week');
+    });
+
+    generateMonthlyReportBtn.addEventListener('click', async () => {
+        await generateAiReport('month');
+    });
+
+    exportAiReportWordBtn.addEventListener('click', async () => {
+        await exportAiReportWord();
+    });
+
+    copyAiReportBtn.addEventListener('click', async () => {
+        await copyAiReport();
+    });
+
+    exportRangeBtn.addEventListener('click', async () => {
+        if (!exportStartDate.value || !exportEndDate.value) {
+            alert('请选择开始和结束日期');
+            return;
+        }
+
+        const startAt = toRangeStart(exportStartDate.value);
+        const endAt = toRangeEnd(exportEndDate.value);
+        if (startAt > endAt) {
+            alert('开始日期不能晚于结束日期');
+            return;
+        }
+
+        await exportHistory(startAt, endAt, `${exportStartDate.value}_to_${exportEndDate.value}`);
     });
 
     // ===== 定期检查服务器状态 =====
@@ -302,6 +957,10 @@ document.addEventListener('DOMContentLoaded', async () => {
                     setServerDot('connected');
                 } else if (!status.connected && serverStatus === 'connected') {
                     setServerDot(status.error ? 'error' : 'disconnected');
+                    scheduleServerReconnect();
+                } else if (!status.connected && serverStatus !== 'connecting') {
+                    setServerDot(status.error ? 'error' : 'disconnected');
+                    scheduleServerReconnect();
                 }
             } catch (e) { /* ignore */ }
         }
