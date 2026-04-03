@@ -254,9 +254,15 @@ async fn generate_openai_report(
     period: String,
     start_at: i64,
     end_at: i64,
+    request_id: Option<String>,
+    app_handle: tauri::AppHandle,
 ) -> Result<reporting::GeneratedReport, String> {
     let config = AppConfig::load();
-    reporting::generate_openai_report(config, &period, start_at, end_at).await
+    let stream_handle = request_id.map(|request_id| reporting::ReportStreamHandle {
+        app_handle,
+        request_id,
+    });
+    reporting::generate_openai_report(config, &period, start_at, end_at, stream_handle).await
 }
 
 fn save_history_export(filename: &str, csv: &str) -> Result<String, String> {

@@ -152,14 +152,16 @@
                         <div class="ai-card-header">
                             <div>
                                 <div class="ai-card-title">生成结果</div>
-                                <div class="ai-card-subtitle">内容可直接复制到邮件、飞书或周报系统</div>
+                                <div class="ai-card-subtitle">实时渲染 Markdown，内容可直接复制到邮件、飞书或周报系统</div>
                             </div>
                             <div class="ai-output-actions">
                                 <button id="export-ai-report-word-btn" class="btn-small">导出 Word</button>
                                 <button id="copy-ai-report-btn" class="btn-small">复制结果</button>
                             </div>
                         </div>
-                        <textarea id="ai-report-output" class="ai-report-output" placeholder="点击“生成周报”或“生成月报”后，这里会显示 AI 输出内容。"></textarea>
+                        <div id="ai-report-output" class="ai-report-output">
+                            <div class="ai-report-placeholder">点击“生成周报”或“生成月报”后，这里会显示实时渲染后的 Markdown 报告。</div>
+                        </div>
                     </div>
                 </div>
                 <div id="history-list" class="history-list">

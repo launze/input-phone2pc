@@ -2,10 +2,12 @@ use crate::storage::config::{AppConfig, OpenAiReportConfig};
 use crate::storage::history::{self, HistoryQuery, HistoryRecord};
 use chrono::{Local, TimeZone};
 use docx_rs::*;
+use futures_util::StreamExt;
 use reqwest::header::{ACCEPT, CONTENT_TYPE};
 use serde::Serialize;
 use serde_json::Value;
 use std::time::Duration;
+use tauri::Emitter;
 
 const DEFAULT_OPENAI_API_URL: &str = "https://api.openai.com/v1/responses";
 const MAX_REPORT_CONTEXT_CHARS: usize = 120_000;
@@ -42,11 +44,24 @@ pub struct GeneratedReport {
     pub content: String,
 }
 
+#[derive(Clone)]
+pub struct ReportStreamHandle {
+    pub app_handle: tauri::AppHandle,
+    pub request_id: String,
+}
+
+#[derive(Clone, Serialize)]
+struct ReportStreamDeltaPayload {
+    request_id: String,
+    delta: String,
+}
+
 pub async fn generate_openai_report(
     config: AppConfig,
     period: &str,
     start_at: i64,
     end_at: i64,
+    stream_handle: Option<ReportStreamHandle>,
 ) -> Result<GeneratedReport, String> {
     let openai = config.openai;
     validate_openai_config(&openai)?;
@@ -90,17 +105,7 @@ pub async fn generate_openai_report(
         .map_err(|e| format!("请求 OpenAI API 失败: {e}"))?;
 
     let status = response.status();
-    let content_type = response
-        .headers()
-        .get(CONTENT_TYPE)
-        .and_then(|value| value.to_str().ok())
-        .unwrap_or("")
-        .to_string();
-    let response_text = response
-        .text()
-        .await
-        .map_err(|e| format!("读取 OpenAI API 响应失败: {e}"))?;
-    let parsed_body = parse_api_response_body(&response_text, &content_type, &api_target.protocol);
+    let parsed_body = read_api_response_body(response, &api_target.protocol, stream_handle.as_ref()).await?;
 
     if !status.is_success() {
         return Err(format!(
@@ -690,6 +695,29 @@ fn build_report_run(text: &str, style: ReportLineStyle) -> Run {
     }
 }
 
+async fn read_api_response_body(
+    response: reqwest::Response,
+    protocol: &ApiProtocol,
+    stream_handle: Option<&ReportStreamHandle>,
+) -> Result<ParsedApiBody, String> {
+    let content_type = response
+        .headers()
+        .get(CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or("")
+        .to_string();
+
+    if content_type.contains("text/event-stream") {
+        consume_sse_response_body(response, protocol, stream_handle).await
+    } else {
+        let response_text = response
+            .text()
+            .await
+            .map_err(|e| format!("读取 OpenAI API 响应失败: {e}"))?;
+        Ok(parse_api_response_body(&response_text, &content_type, protocol))
+    }
+}
+
 fn parse_api_response_body(
     response_text: &str,
     content_type: &str,
@@ -729,6 +757,140 @@ fn parse_api_response_body(
         body_preview: response_text_preview(trimmed),
         transport: ResponseBodyTransport::Text,
     }
+}
+
+async fn consume_sse_response_body(
+    response: reqwest::Response,
+    protocol: &ApiProtocol,
+    stream_handle: Option<&ReportStreamHandle>,
+) -> Result<ParsedApiBody, String> {
+    let mut stream = response.bytes_stream();
+    let mut raw_response = String::new();
+    let mut normalized_buffer = String::new();
+    let mut state = StreamingParseState::default();
+
+    while let Some(chunk) = stream.next().await {
+        let bytes = chunk.map_err(|e| format!("读取 OpenAI API 流式响应失败: {e}"))?;
+        let chunk_text = String::from_utf8_lossy(&bytes);
+        raw_response.push_str(&chunk_text);
+        normalized_buffer.push_str(&chunk_text.replace("\r\n", "\n"));
+
+        while let Some((block, rest)) = take_next_sse_block(&normalized_buffer) {
+            process_sse_block(&block, protocol, stream_handle, &mut state);
+            normalized_buffer = rest;
+        }
+    }
+
+    if !normalized_buffer.trim().is_empty() {
+        process_sse_block(&normalized_buffer, protocol, stream_handle, &mut state);
+    }
+
+    let content = state
+        .final_json
+        .as_ref()
+        .and_then(|response_json| extract_response_text(response_json, protocol))
+        .or_else(|| {
+            if state.content_chunks.is_empty() {
+                None
+            } else {
+                Some(state.content_chunks.join(""))
+            }
+        });
+
+    if let (Some(content), Some(stream_handle)) = (&content, stream_handle) {
+        if state.content_chunks.is_empty() && !content.is_empty() {
+            emit_report_stream_delta(stream_handle, content);
+        }
+    }
+
+    Ok(ParsedApiBody {
+        json: state.final_json,
+        content,
+        error_message: state.error_message,
+        body_preview: response_text_preview(&raw_response),
+        transport: ResponseBodyTransport::Sse,
+    })
+}
+
+fn take_next_sse_block(buffer: &str) -> Option<(String, String)> {
+    buffer.find("\n\n").map(|index| {
+        let block = buffer[..index].to_string();
+        let rest = buffer[index + 2..].to_string();
+        (block, rest)
+    })
+}
+
+fn process_sse_block(
+    block: &str,
+    protocol: &ApiProtocol,
+    stream_handle: Option<&ReportStreamHandle>,
+    state: &mut StreamingParseState,
+) {
+    let mut data_lines = Vec::new();
+    for line in block.lines() {
+        if let Some(data) = line.strip_prefix("data:") {
+            data_lines.push(data.trim_start().to_string());
+        }
+    }
+
+    if data_lines.is_empty() {
+        return;
+    }
+
+    let data = data_lines.join("\n");
+    process_sse_data_chunk(&data, protocol, stream_handle, state);
+}
+
+fn process_sse_data_chunk(
+    data: &str,
+    protocol: &ApiProtocol,
+    stream_handle: Option<&ReportStreamHandle>,
+    state: &mut StreamingParseState,
+) {
+    let trimmed = data.trim();
+    if trimmed.is_empty() || trimmed == "[DONE]" {
+        return;
+    }
+
+    let Ok(event_json) = serde_json::from_str::<Value>(trimmed) else {
+        return;
+    };
+
+    if state.error_message.is_none() {
+        state.error_message = extract_json_error_message(&event_json);
+    }
+
+    if let Some(response) = event_json.get("response") {
+        state.final_json = Some(response.clone());
+    } else if state.final_json.is_none() && is_complete_response_object(&event_json, protocol) {
+        state.final_json = Some(event_json.clone());
+    }
+
+    if let Some(delta) = extract_sse_delta_text(&event_json, protocol) {
+        if !delta.is_empty() {
+            if let Some(stream_handle) = stream_handle {
+                emit_report_stream_delta(stream_handle, &delta);
+            }
+            state.content_chunks.push(delta);
+        }
+    }
+}
+
+fn emit_report_stream_delta(stream_handle: &ReportStreamHandle, delta: &str) {
+    if delta.is_empty() {
+        return;
+    }
+
+    stream_handle
+        .app_handle
+        .emit(
+            "openai_report_delta",
+            ReportStreamDeltaPayload {
+                request_id: stream_handle.request_id.clone(),
+                delta: delta.to_string(),
+            },
+        )
+        .unwrap_or(());
 }
 
 fn looks_like_sse(content_type: &str, response_text: &str) -> bool {
@@ -966,11 +1128,13 @@ fn build_api_payload(protocol: &ApiProtocol, model_name: &str, prompt: &str) -> 
     match protocol {
         ApiProtocol::Responses => serde_json::json!({
             "model": model_name,
+            "stream": true,
             "instructions": "你是一名中文工作总结助手。只能基于用户提供的记录总结，禁止虚构未出现的事项；如信息不足，要直接说明记录未体现。",
             "input": prompt,
         }),
         ApiProtocol::ChatCompletions => serde_json::json!({
             "model": model_name,
+            "stream": true,
             "messages": [
                 {
                     "role": "system",
@@ -1061,6 +1225,13 @@ struct ParsedApiBody {
     error_message: Option<String>,
     body_preview: String,
     transport: ResponseBodyTransport,
+}
+
+#[derive(Default)]
+struct StreamingParseState {
+    final_json: Option<Value>,
+    content_chunks: Vec<String>,
+    error_message: Option<String>,
 }
 
 enum ApiProtocol {

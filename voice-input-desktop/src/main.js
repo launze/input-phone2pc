@@ -68,6 +68,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     let aiReportBusy = false;
     let currentAiReport = null;
     let aiConfigured = false;
+    let currentAiReportContent = '';
+    let currentAiRequestId = null;
 
     // ===== 视图切换 =====
     function switchToHistoryView() {
@@ -162,6 +164,126 @@ document.addEventListener('DOMContentLoaded', async () => {
         }
     }
 
+    function createAiReportRequestId(period) {
+        return `${period}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    }
+
+    function setAiReportContent(content = '') {
+        currentAiReportContent = content;
+        renderAiReportMarkdown(currentAiReportContent);
+        exportAiReportWordBtn.disabled = aiReportBusy || !currentAiReportContent.trim();
+    }
+
+    function appendAiReportDelta(delta = '') {
+        if (!delta) return;
+        currentAiReportContent += delta;
+        renderAiReportMarkdown(currentAiReportContent);
+        exportAiReportWordBtn.disabled = aiReportBusy || !currentAiReportContent.trim();
+    }
+
+    function renderAiReportMarkdown(markdown = '') {
+        const normalized = markdown.trim();
+        if (!normalized) {
+            aiReportOutput.innerHTML = '<div class="ai-report-placeholder">点击“生成周报”或“生成月报”后，这里会显示实时渲染后的 Markdown 报告。</div>';
+            return;
+        }
+
+        aiReportOutput.innerHTML = markdownToHtml(markdown);
+        if (aiReportBusy) {
+            aiReportOutput.scrollTop = aiReportOutput.scrollHeight;
+        }
+    }
+
+    function markdownToHtml(markdown) {
+        const lines = String(markdown || '').replace(/\r\n/g, '\n').split('\n');
+        const blocks = [];
+        let paragraph = [];
+        let listType = null;
+        let listItems = [];
+
+        function flushParagraph() {
+            if (!paragraph.length) return;
+            blocks.push(`<p>${paragraph.map(renderInlineMarkdown).join('<br>')}</p>`);
+            paragraph = [];
+        }
+
+        function flushList() {
+            if (!listType || !listItems.length) return;
+            blocks.push(`<${listType}>${listItems.join('')}</${listType}>`);
+            listType = null;
+            listItems = [];
+        }
+
+        for (const rawLine of lines) {
+            const line = rawLine.trim();
+
+            if (!line) {
+                flushParagraph();
+                flushList();
+                continue;
+            }
+
+            const headingMatch = line.match(/^(#{1,6})\s+(.*)$/);
+            if (headingMatch) {
+                flushParagraph();
+                flushList();
+                const level = Math.min(headingMatch[1].length, 6);
+                blocks.push(`<h${level}>${renderInlineMarkdown(headingMatch[2])}</h${level}>`);
+                continue;
+            }
+
+            if (/^---+$/.test(line) || /^\*\*\*+$/.test(line)) {
+                flushParagraph();
+                flushList();
+                blocks.push('<hr>');
+                continue;
+            }
+
+            const unorderedMatch = line.match(/^[-*+]\s+(.*)$/);
+            if (unorderedMatch) {
+                flushParagraph();
+                if (listType !== 'ul') {
+                    flushList();
+                    listType = 'ul';
+                }
+                listItems.push(`<li>${renderInlineMarkdown(unorderedMatch[1])}</li>`);
+                continue;
+            }
+
+            const orderedMatch = line.match(/^(\d+)([.)、）])\s+(.*)$/);
+            if (orderedMatch) {
+                flushParagraph();
+                if (listType !== 'ol') {
+                    flushList();
+                    listType = 'ol';
+                }
+                listItems.push(`<li>${renderInlineMarkdown(orderedMatch[3])}</li>`);
+                continue;
+            }
+
+            const quoteMatch = line.match(/^>\s?(.*)$/);
+            if (quoteMatch) {
+                flushParagraph();
+                flushList();
+                blocks.push(`<blockquote>${renderInlineMarkdown(quoteMatch[1])}</blockquote>`);
+                continue;
+            }
+
+            paragraph.push(line);
+        }
+
+        flushParagraph();
+        flushList();
+        return blocks.join('');
+    }
+
+    function renderInlineMarkdown(text) {
+        return escapeHtml(text)
+            .replace(/`([^`]+)`/g, '<code>$1</code>')
+            .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
+            .replace(/\*([^*]+)\*/g, '<em>$1</em>');
+    }
+
     function refreshAiConfigurationState(openai = collectOpenAiConfigFromForm()) {
         aiConfigured = hasConfiguredOpenAi(openai);
         syncAiPanelUi();
@@ -175,7 +297,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         generateWeeklyReportBtn.disabled = busy;
         generateMonthlyReportBtn.disabled = busy;
         copyAiReportBtn.disabled = busy;
-        exportAiReportWordBtn.disabled = busy || !aiReportOutput.value.trim();
+        exportAiReportWordBtn.disabled = busy || !currentAiReportContent.trim();
         if (busy) {
             generateWeeklyReportBtn.textContent = busyText;
             generateMonthlyReportBtn.textContent = busyText;
@@ -216,6 +338,11 @@ document.addEventListener('DOMContentLoaded', async () => {
         try {
             setAiReportBusy(true, actionLabel);
             setAiReportStatus(`${actionLabel}中，请稍候...`);
+            toggleAiPanel(true, { revealSettings: false });
+            setAiReportContent('');
+            currentAiReport = null;
+            const requestId = createAiReportRequestId(period);
+            currentAiRequestId = requestId;
             await saveOpenAiConfig({ silent: true });
 
             const startAt = isWeek ? getStartOfWeek().getTime() : getStartOfMonth().getTime();
@@ -223,10 +350,14 @@ document.addEventListener('DOMContentLoaded', async () => {
             const report = await invoke('generate_openai_report', {
                 period,
                 startAt,
-                endAt
+                endAt,
+                requestId
             });
 
-            aiReportOutput.value = report?.content || '';
+            if (currentAiRequestId === requestId) {
+                setAiReportContent(report?.content || currentAiReportContent);
+                currentAiRequestId = null;
+            }
             currentAiReport = {
                 period,
                 startAt,
@@ -242,10 +373,10 @@ document.addEventListener('DOMContentLoaded', async () => {
                     : `${actionLabel}已生成，共使用 ${total} 条记录`,
                 'success'
             );
-            exportAiReportWordBtn.disabled = !aiReportOutput.value.trim();
         } catch (error) {
             console.error(`❌ ${actionLabel}失败:`, error);
             const message = typeof error === 'string' ? error : error?.message || '生成失败';
+            currentAiRequestId = null;
             setAiReportStatus(message, 'error');
             alert(`${actionLabel}失败：${message}`);
         } finally {
@@ -254,7 +385,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
 
     async function copyAiReport() {
-        const content = aiReportOutput.value.trim();
+        const content = currentAiReportContent.trim();
         if (!content) {
             setAiReportStatus('当前没有可复制的报告内容', 'error');
             return;
@@ -264,8 +395,12 @@ document.addEventListener('DOMContentLoaded', async () => {
             if (navigator.clipboard?.writeText) {
                 await navigator.clipboard.writeText(content);
             } else {
-                aiReportOutput.select();
+                const tempTextArea = document.createElement('textarea');
+                tempTextArea.value = content;
+                document.body.appendChild(tempTextArea);
+                tempTextArea.select();
                 document.execCommand('copy');
+                document.body.removeChild(tempTextArea);
             }
             setAiReportStatus('报告内容已复制到剪贴板', 'success');
         } catch (error) {
@@ -275,7 +410,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
 
     async function exportAiReportWord() {
-        const content = aiReportOutput.value.trim();
+        const content = currentAiReportContent.trim();
         if (!content) {
             setAiReportStatus('当前没有可导出的报告内容', 'error');
             return;
@@ -451,6 +586,14 @@ document.addEventListener('DOMContentLoaded', async () => {
             console.log('📥 服务器已暂存消息:', JSON.stringify(event));
         });
 
+        tauriEvent.listen('openai_report_delta', (event) => {
+            const payload = event.payload || {};
+            if (!payload.request_id || payload.request_id !== currentAiRequestId) {
+                return;
+            }
+            appendAiReportDelta(payload.delta || '');
+        });
+
         // 监听配对成功事件
         tauriEvent.listen('device_paired', (event) => {
             console.log('✅ 配对成功事件:', JSON.stringify(event));
@@ -485,7 +628,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         const openaiConfig = config.openai || {};
         populateOpenAiConfig(openaiConfig);
         refreshAiConfigurationState(openaiConfig);
-        exportAiReportWordBtn.disabled = true;
+        setAiReportContent('');
         if (aiConfigured) {
             setAiReportStatus('');
             toggleAiPanel(false);
@@ -573,10 +716,6 @@ document.addEventListener('DOMContentLoaded', async () => {
             setAiReportStatus(message, 'error');
             alert(`保存 OpenAI 配置失败：${message}`);
         }
-    });
-
-    aiReportOutput.addEventListener('input', () => {
-        exportAiReportWordBtn.disabled = aiReportBusy || !aiReportOutput.value.trim();
     });
 
     [openaiApiKeyInput, openaiApiUrlInput, openaiModelNameInput, weeklyPromptTemplateInput, monthlyPromptTemplateInput]
