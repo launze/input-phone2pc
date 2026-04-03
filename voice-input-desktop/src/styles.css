@@ -501,7 +501,9 @@ input:checked + .slider:before {
 
 .ai-report-output {
     width: 100%;
+    height: min(56vh, 520px);
     min-height: 280px;
+    max-height: 520px;
     flex: 1;
     padding: 12px;
     border: 1px solid #d5ddea;
@@ -511,7 +513,10 @@ input:checked + .slider:before {
     line-height: 1.7;
     color: #233044;
     outline: none;
+    overflow-x: hidden;
     overflow-y: auto;
+    scrollbar-gutter: stable;
+    overscroll-behavior: contain;
 }
 
 .ai-report-placeholder {
