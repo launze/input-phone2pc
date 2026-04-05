@@ -18,6 +18,7 @@ class ConfigManager(context: Context) {
         private const val KEY_DEVICE_NAME = "device_name"
         private const val KEY_NOTIFICATION_ENABLED = "notification_enabled"
         private const val KEY_PAIRED_DEVICES = "paired_devices"
+        private const val KEY_LAST_TARGET_DEVICE = "last_target_device"
     }
 
     // 保存服务器配置
@@ -121,6 +122,29 @@ class ConfigManager(context: Context) {
         val devices = getPairedDevices().toMutableMap()
         devices.remove(deviceId)
         prefs.edit().putString(KEY_PAIRED_DEVICES, gson.toJson(devices)).apply()
+
+        val lastTarget = getLastTargetDevice()
+        if (lastTarget?.deviceId == deviceId) {
+            clearLastTargetDevice()
+        }
+    }
+
+    fun saveLastTargetDevice(deviceId: String, deviceName: String) {
+        val selected = LastTargetDevice(deviceId = deviceId, deviceName = deviceName)
+        prefs.edit().putString(KEY_LAST_TARGET_DEVICE, gson.toJson(selected)).apply()
+    }
+
+    fun getLastTargetDevice(): LastTargetDevice? {
+        val json = prefs.getString(KEY_LAST_TARGET_DEVICE, null) ?: return null
+        return try {
+            gson.fromJson(json, LastTargetDevice::class.java)
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    fun clearLastTargetDevice() {
+        prefs.edit().remove(KEY_LAST_TARGET_DEVICE).apply()
     }
 
     // 清除所有配置
@@ -134,5 +158,10 @@ class ConfigManager(context: Context) {
         val deviceType: String,
         val localIp: String = "",
         val localPort: Int = 0
+    )
+
+    data class LastTargetDevice(
+        val deviceId: String,
+        val deviceName: String
     )
 }

@@ -42,8 +42,10 @@ fun ConnectionStatusIndicator(
 
         // 状态文本
         Text(
-            text = if (connected && deviceName != null) {
+            text = if (connected && !deviceName.isNullOrBlank()) {
                 "已连接到「$deviceName」"
+            } else if (!deviceName.isNullOrBlank()) {
+                "已选择「$deviceName」(离线)"
             } else {
                 "未连接"
             },

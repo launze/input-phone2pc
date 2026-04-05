@@ -257,7 +257,7 @@ fun InputScreen(
                         ) {
                             if (sendAvailable) {
                                 Text(
-                                    text = if (connectionStatus.connected) "已连接" else "离线消息可暂存",
+                                    text = if (connectionStatus.connected) "已连接" else "设备离线",
                                     style = MaterialTheme.typography.titleMedium,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
@@ -265,33 +265,49 @@ fun InputScreen(
                                     text = if (connectionStatus.connected) {
                                         "在手机上输入文字或发送图片到电脑"
                                     } else {
-                                        "电脑离线时，消息会先保存到服务器，待电脑上线后同步"
+                                        "消息会先暂存到服务器，待电脑上线后自动同步"
                                     },
                                     style = MaterialTheme.typography.bodyMedium,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                             } else {
                                 Text(
-                                    text = if (pairedDevices.isEmpty()) "未配对任何设备" else "未连接设备",
+                                    text = if (pairedDevices.isEmpty()) {
+                                        "未配对任何设备"
+                                    } else if (connectionStatus.deviceName.isNotBlank()) {
+                                        "已选择设备（离线）"
+                                    } else {
+                                        "已配对设备"
+                                    },
                                     style = MaterialTheme.typography.titleMedium,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                                 Text(
-                                    text = "扫描电脑端二维码完成配对",
+                                    text = if (pairedDevices.isEmpty()) {
+                                        "扫描电脑端二维码完成配对"
+                                    } else {
+                                        "等待服务器连接或电脑上线，无需重新扫码"
+                                    },
                                     style = MaterialTheme.typography.bodyMedium,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                                 Button(
-                                    onClick = onNavigateToScanner,
+                                    onClick = {
+                                        if (pairedDevices.isEmpty()) {
+                                            onNavigateToScanner()
+                                        } else {
+                                            showDeviceDialog = true
+                                        }
+                                    },
                                     modifier = Modifier.padding(top = 8.dp)
                                 ) {
                                     Icon(
-                                        Icons.Default.QrCodeScanner,
+                                        if (pairedDevices.isEmpty()) Icons.Default.QrCodeScanner else Icons.Default.Link,
                                         contentDescription = null,
                                         modifier = Modifier.size(20.dp)
                                     )
                                     Spacer(modifier = Modifier.width(8.dp))
-                                    Text("扫码配对")
+                                    Text(if (pairedDevices.isEmpty()) "扫码配对" else "选择设备")
                                 }
                             }
                         }

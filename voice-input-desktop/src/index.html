@@ -99,7 +99,7 @@
                     <div class="ai-panel-toolbar">
                         <div class="ai-panel-summary">
                             <div class="ai-panel-title">AI 周报 / 月报</div>
-                            <div id="ai-setup-hint" class="ai-panel-hint">基于本地历史记录生成报告，可导出为 Word。</div>
+                            <div id="ai-setup-hint" class="ai-panel-hint">支持流式生成与 Markdown 预览。</div>
                         </div>
                         <div class="ai-run-row">
                             <div class="ai-run-actions">
@@ -113,7 +113,6 @@
                         <div class="ai-card-header">
                             <div>
                                 <div class="ai-card-title">OpenAI 报告配置</div>
-                                <div class="ai-card-subtitle">可自定义 API Key、URL、模型名称及周报/月报模板</div>
                             </div>
                             <button id="save-openai-config-btn" class="btn-small">保存配置</button>
                         </div>
@@ -150,17 +149,18 @@
                     </div>
                     <div class="ai-output-card">
                         <div class="ai-card-header">
-                            <div>
-                                <div class="ai-card-title">生成结果</div>
-                                <div class="ai-card-subtitle">实时渲染 Markdown，内容可直接复制到邮件、飞书或周报系统</div>
-                            </div>
+                            <div class="ai-card-title">生成结果</div>
                             <div class="ai-output-actions">
                                 <button id="export-ai-report-word-btn" class="btn-small">导出 Word</button>
-                                <button id="copy-ai-report-btn" class="btn-small">复制结果</button>
+                                <button id="copy-ai-report-btn" class="btn-small">复制 Markdown</button>
                             </div>
                         </div>
+                        <div class="ai-output-toolbar">
+                            <span class="ai-output-label">Markdown 预览</span>
+                            <button id="copy-ai-report-inline-btn" class="btn-small">复制</button>
+                        </div>
                         <div id="ai-report-output" class="ai-report-output">
-                            <div class="ai-report-placeholder">点击“生成周报”或“生成月报”后，这里会显示实时渲染后的 Markdown 报告。</div>
+                            <div class="ai-report-placeholder">报告将在这里实时显示。</div>
                         </div>
                     </div>
                 </div>

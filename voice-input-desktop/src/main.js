@@ -48,6 +48,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     const aiReportStatus = document.getElementById('ai-report-status');
     const aiReportOutput = document.getElementById('ai-report-output');
     const copyAiReportBtn = document.getElementById('copy-ai-report-btn');
+    const copyAiReportInlineBtn = document.getElementById('copy-ai-report-inline-btn');
     const exportAiReportWordBtn = document.getElementById('export-ai-report-word-btn');
 
     let connectedDeviceId = null;
@@ -70,6 +71,9 @@ document.addEventListener('DOMContentLoaded', async () => {
     let aiConfigured = false;
     let currentAiReportContent = '';
     let currentAiRequestId = null;
+    let aiReportShouldAutoScroll = true;
+    let aiReportIgnoreScrollEvent = false;
+    const AI_REPORT_SCROLL_THRESHOLD = 24;
 
     // ===== 视图切换 =====
     function switchToHistoryView() {
@@ -112,8 +116,8 @@ document.addEventListener('DOMContentLoaded', async () => {
         toggleAiSettingsBtn.classList.toggle('active', panelOpen && settingsOpen);
         aiReportPanel.classList.toggle('settings-hidden', !settingsOpen);
         aiSetupHint.textContent = aiConfigured
-            ? '基于本地历史记录生成周报或月报，支持导出为 Word。'
-            : '请先完成 AI 配置。阿里云百炼兼容模式可填写 https://dashscope.aliyuncs.com/compatible-mode/v1。';
+            ? '支持流式生成与 Markdown 预览。'
+            : '请先填写 AI 配置。';
     }
 
     function setAiSettingsVisible(visible) {
@@ -168,29 +172,60 @@ document.addEventListener('DOMContentLoaded', async () => {
         return `${period}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     }
 
-    function setAiReportContent(content = '') {
+    function updateAiReportActionState() {
+        const hasContent = Boolean(currentAiReportContent.trim());
+        copyAiReportBtn.disabled = !hasContent;
+        copyAiReportInlineBtn.disabled = !hasContent;
+        exportAiReportWordBtn.disabled = aiReportBusy || !hasContent;
+    }
+
+    function isAiReportNearBottom() {
+        return aiReportOutput.scrollHeight - aiReportOutput.scrollTop - aiReportOutput.clientHeight <= AI_REPORT_SCROLL_THRESHOLD;
+    }
+
+    function scrollAiReportToBottom() {
+        aiReportIgnoreScrollEvent = true;
+        aiReportOutput.scrollTop = aiReportOutput.scrollHeight;
+        requestAnimationFrame(() => {
+            aiReportIgnoreScrollEvent = false;
+        });
+    }
+
+    function setAiReportContent(content = '', { resetAutoScroll = false } = {}) {
         currentAiReportContent = content;
+        if (resetAutoScroll) {
+            aiReportShouldAutoScroll = true;
+        }
         renderAiReportMarkdown(currentAiReportContent);
-        exportAiReportWordBtn.disabled = aiReportBusy || !currentAiReportContent.trim();
+        updateAiReportActionState();
     }
 
     function appendAiReportDelta(delta = '') {
         if (!delta) return;
         currentAiReportContent += delta;
         renderAiReportMarkdown(currentAiReportContent);
-        exportAiReportWordBtn.disabled = aiReportBusy || !currentAiReportContent.trim();
+        updateAiReportActionState();
     }
 
     function renderAiReportMarkdown(markdown = '') {
         const normalized = markdown.trim();
         if (!normalized) {
-            aiReportOutput.innerHTML = '<div class="ai-report-placeholder">点击“生成周报”或“生成月报”后，这里会显示实时渲染后的 Markdown 报告。</div>';
+            aiReportOutput.innerHTML = '<div class="ai-report-placeholder">报告将在这里实时显示。</div>';
+            aiReportShouldAutoScroll = true;
+            scrollAiReportToBottom();
             return;
         }
 
+        const previousScrollTop = aiReportOutput.scrollTop;
         aiReportOutput.innerHTML = markdownToHtml(markdown);
-        if (aiReportBusy) {
-            aiReportOutput.scrollTop = aiReportOutput.scrollHeight;
+        if (aiReportShouldAutoScroll) {
+            scrollAiReportToBottom();
+        } else {
+            aiReportIgnoreScrollEvent = true;
+            aiReportOutput.scrollTop = previousScrollTop;
+            requestAnimationFrame(() => {
+                aiReportIgnoreScrollEvent = false;
+            });
         }
     }
 
@@ -296,8 +331,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         saveOpenAiConfigBtn.disabled = busy;
         generateWeeklyReportBtn.disabled = busy;
         generateMonthlyReportBtn.disabled = busy;
-        copyAiReportBtn.disabled = busy;
-        exportAiReportWordBtn.disabled = busy || !currentAiReportContent.trim();
+        updateAiReportActionState();
         if (busy) {
             generateWeeklyReportBtn.textContent = busyText;
             generateMonthlyReportBtn.textContent = busyText;
@@ -339,7 +373,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             setAiReportBusy(true, actionLabel);
             setAiReportStatus(`${actionLabel}中，请稍候...`);
             toggleAiPanel(true, { revealSettings: false });
-            setAiReportContent('');
+            setAiReportContent('', { resetAutoScroll: true });
             currentAiReport = null;
             const requestId = createAiReportRequestId(period);
             currentAiRequestId = requestId;
@@ -628,7 +662,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         const openaiConfig = config.openai || {};
         populateOpenAiConfig(openaiConfig);
         refreshAiConfigurationState(openaiConfig);
-        setAiReportContent('');
+        setAiReportContent('', { resetAutoScroll: true });
         if (aiConfigured) {
             setAiReportStatus('');
             toggleAiPanel(false);
@@ -716,6 +750,11 @@ document.addEventListener('DOMContentLoaded', async () => {
             setAiReportStatus(message, 'error');
             alert(`保存 OpenAI 配置失败：${message}`);
         }
+    });
+
+    aiReportOutput.addEventListener('scroll', () => {
+        if (aiReportIgnoreScrollEvent) return;
+        aiReportShouldAutoScroll = isAiReportNearBottom();
     });
 
     [openaiApiKeyInput, openaiApiUrlInput, openaiModelNameInput, weeklyPromptTemplateInput, monthlyPromptTemplateInput]
@@ -1068,6 +1107,10 @@ document.addEventListener('DOMContentLoaded', async () => {
     });
 
     copyAiReportBtn.addEventListener('click', async () => {
+        await copyAiReport();
+    });
+
+    copyAiReportInlineBtn.addEventListener('click', async () => {
         await copyAiReport();
     });
 

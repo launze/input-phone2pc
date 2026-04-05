@@ -100,6 +100,7 @@ class InputViewModel(application: Application) : AndroidViewModel(application) {
 
     init {
         refreshPairedDevices()
+        restoreSelectedRelayDevice()
         updateSendAvailability()
 
         viewModelScope.launch {
@@ -108,6 +109,14 @@ class InputViewModel(application: Application) : AndroidViewModel(application) {
 
         viewModelScope.launch {
             serverConnection.connectionState.collect {
+                syncSelectedRelayDeviceStatus()
+                updateSendAvailability()
+            }
+        }
+
+        viewModelScope.launch {
+            serverConnection.serverDevices.collect {
+                syncSelectedRelayDeviceStatus()
                 updateSendAvailability()
             }
         }
@@ -230,21 +239,25 @@ class InputViewModel(application: Application) : AndroidViewModel(application) {
                 deviceType = deviceType
             )
             refreshPairedDevices()
-            connectToServerDevice(
-                ServerDeviceInfo(
-                    deviceId = deviceId,
-                    deviceName = deviceName,
-                    deviceType = deviceType,
-                    online = true
+            if (relayTargetDeviceId == null || relayTargetDeviceId == deviceId) {
+                connectToServerDevice(
+                    ServerDeviceInfo(
+                        deviceId = deviceId,
+                        deviceName = deviceName,
+                        deviceType = deviceType,
+                        online = true
+                    )
                 )
-            )
-            addLog("已自动连接到配对设备: $deviceName")
+                addLog("已自动连接到配对设备: $deviceName")
+            } else {
+                syncSelectedRelayDeviceStatus()
+            }
         }
 
         serverConnection.onPairedDeviceOffline = { deviceId, deviceName, deviceType ->
             addLog("配对设备离线: $deviceName ($deviceType)")
             if (relayTargetDeviceId == deviceId) {
-                _connectionStatus.value = ConnectionStatus(connected = false, deviceName = "")
+                syncSelectedRelayDeviceStatus()
                 addLog("设备 $deviceName 已离线，连接已断开")
             }
             updateSendAvailability()
@@ -255,7 +268,9 @@ class InputViewModel(application: Application) : AndroidViewModel(application) {
             configManager.removePairedDevice(deviceId)
             refreshPairedDevices()
             if (relayTargetDeviceId == deviceId) {
-                disconnectFromServerDevice()
+                relayTargetDeviceId = null
+                relayTargetDeviceName = null
+                restoreSelectedRelayDevice()
             }
             updateSendAvailability()
         }
@@ -307,6 +322,41 @@ class InputViewModel(application: Application) : AndroidViewModel(application) {
         _pairedDevices.value = configManager.getPairedDevices()
     }
 
+    private fun restoreSelectedRelayDevice() {
+        val devices = _pairedDevices.value
+        if (devices.isEmpty()) {
+            relayTargetDeviceId = null
+            relayTargetDeviceName = null
+            _connectionStatus.value = ConnectionStatus(connected = false, deviceName = "")
+            return
+        }
+
+        val lastTarget = configManager.getLastTargetDevice()
+        val restored = when {
+            lastTarget != null && devices.containsKey(lastTarget.deviceId) -> {
+                devices[lastTarget.deviceId]?.let { paired ->
+                    lastTarget.deviceId to paired.deviceName
+                }
+            }
+
+            else -> devices.entries.firstOrNull()?.let { entry ->
+                entry.key to entry.value.deviceName
+            }
+        }
+
+        if (restored == null) {
+            relayTargetDeviceId = null
+            relayTargetDeviceName = null
+            _connectionStatus.value = ConnectionStatus(connected = false, deviceName = "")
+            return
+        }
+
+        relayTargetDeviceId = restored.first
+        relayTargetDeviceName = restored.second
+        configManager.saveLastTargetDevice(restored.first, restored.second)
+        syncSelectedRelayDeviceStatus()
+    }
+
     fun startDiscovery() {
         viewModelScope.launch {
             networkManager.startUdpDiscovery {
@@ -331,10 +381,8 @@ class InputViewModel(application: Application) : AndroidViewModel(application) {
     fun connectToServerDevice(device: ServerDeviceInfo) {
         relayTargetDeviceId = device.deviceId
         relayTargetDeviceName = device.deviceName
-        _connectionStatus.value = ConnectionStatus(
-            connected = device.online,
-            deviceName = buildConnectionName(device.deviceName)
-        )
+        configManager.saveLastTargetDevice(device.deviceId, device.deviceName)
+        syncSelectedRelayDeviceStatus()
         addLog("已选择服务器设备: ${device.deviceName}")
         updateSendAvailability()
     }
@@ -348,13 +396,17 @@ class InputViewModel(application: Application) : AndroidViewModel(application) {
         configManager.removePairedDevice(deviceId)
         refreshPairedDevices()
         if (relayTargetDeviceId == deviceId) {
-            disconnectFromServerDevice()
+            relayTargetDeviceId = null
+            relayTargetDeviceName = null
+            restoreSelectedRelayDevice()
         }
+        updateSendAvailability()
     }
 
     fun disconnectFromServerDevice() {
         relayTargetDeviceId = null
         relayTargetDeviceName = null
+        configManager.clearLastTargetDevice()
         _connectionStatus.value = ConnectionStatus(connected = false, deviceName = "")
         updateSendAvailability()
     }
@@ -878,8 +930,8 @@ class InputViewModel(application: Application) : AndroidViewModel(application) {
     fun disconnectFromServer() {
         heartbeatJob?.cancel()
         deviceListRefreshJob?.cancel()
-        disconnectFromServerDevice()
         serverConnection.disconnect()
+        syncSelectedRelayDeviceStatus()
         updateSendAvailability()
     }
 
@@ -1090,6 +1142,30 @@ class InputViewModel(application: Application) : AndroidViewModel(application) {
 
     private fun buildConnectionName(deviceName: String): String {
         return "$deviceName (服务器中转)"
+    }
+
+    private fun syncSelectedRelayDeviceStatus() {
+        val targetId = relayTargetDeviceId
+        if (targetId.isNullOrBlank()) {
+            _connectionStatus.value = ConnectionStatus(connected = false, deviceName = "")
+            return
+        }
+
+        val paired = _pairedDevices.value[targetId]
+        val resolvedName = paired?.deviceName
+            ?: relayTargetDeviceName
+            ?: configManager.getLastTargetDevice()?.takeIf { it.deviceId == targetId }?.deviceName
+            ?: targetId
+
+        relayTargetDeviceName = resolvedName
+
+        val online = serverConnection.isConnected() &&
+            serverDevices.value.any { it.deviceId == targetId && it.online }
+
+        _connectionStatus.value = ConnectionStatus(
+            connected = online,
+            deviceName = buildConnectionName(resolvedName)
+        )
     }
 
     private fun updateSendAvailability() {
