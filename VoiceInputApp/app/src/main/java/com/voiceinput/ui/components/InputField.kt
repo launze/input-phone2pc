@@ -35,8 +35,8 @@ fun InputField(
                 value = text,
                 onValueChange = onTextChange,
                 modifier = Modifier.weight(1f),
-                placeholder = { 
-                    Text(if (enabled) "输入文字..." else "请先连接设备") 
+                placeholder = {
+                    Text(if (enabled) "输入文字..." else "请先连接设备")
                 },
                 enabled = enabled,
                 keyboardOptions = KeyboardOptions(

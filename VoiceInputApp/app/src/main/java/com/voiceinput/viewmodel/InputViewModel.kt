@@ -11,12 +11,14 @@ import com.voiceinput.data.ConfigManager
 import com.voiceinput.data.model.ClipboardImagePayload
 import com.voiceinput.data.model.Device
 import com.voiceinput.data.model.HistoryItem
+import com.voiceinput.data.model.NotificationData
 import com.voiceinput.data.model.ServerConfig
 import com.voiceinput.data.model.ServerDeviceInfo
 import com.voiceinput.data.model.SyncStatus
 import com.voiceinput.data.repository.HistoryRepository
 import com.voiceinput.network.NetworkManager
 import com.voiceinput.network.ServerConnection
+import com.voiceinput.service.NotificationListenerService
 import com.voiceinput.util.ImageTransferCodec
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -92,6 +94,11 @@ class InputViewModel(application: Application) : AndroidViewModel(application) {
         MutableStateFlow<Map<String, ConfigManager.PairedDevice>>(emptyMap())
     val pairedDevices: StateFlow<Map<String, ConfigManager.PairedDevice>> = _pairedDevices.asStateFlow()
 
+    private val _notificationForwardingEnabled =
+        MutableStateFlow(configManager.isNotificationEnabled())
+    val notificationForwardingEnabled: StateFlow<Boolean> =
+        _notificationForwardingEnabled.asStateFlow()
+
     private var relayTargetDeviceId: String? = null
     private var relayTargetDeviceName: String? = null
     private var pendingScannedPair: PendingScannedPair? = null
@@ -123,11 +130,20 @@ class InputViewModel(application: Application) : AndroidViewModel(application) {
 
         viewModelScope.launch {
             networkManager.isConnected.collect {
+                syncLanConnectionStatus()
+                updateSendAvailability()
+            }
+        }
+
+        viewModelScope.launch {
+            networkManager.connectedDevice.collect {
+                syncLanConnectionStatus()
                 updateSendAvailability()
             }
         }
 
         registerServerCallbacks()
+        registerNotificationCallbacks()
 
         if (configManager.isServerModeEnabled()) {
             val url = configManager.getServerUrl()
@@ -314,8 +330,36 @@ class InputViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    private fun registerNotificationCallbacks() {
+        NotificationListenerService.onNotificationReceived = { notification ->
+            if (_notificationForwardingEnabled.value) {
+                viewModelScope.launch {
+                    forwardNotification(notification)
+                }
+            }
+        }
+    }
+
+    private suspend fun forwardNotification(notification: NotificationData) {
+        val targetId = relayTargetDeviceId ?: return
+        if (!serverConnection.isConnected()) {
+            return
+        }
+
+        val forwarded = serverConnection.sendNotificationForward(targetId, notification)
+        if (forwarded) {
+            addLog("已转发通知: ${notification.appName}")
+        }
+    }
+
     fun clearLog() {
         _connectionLog.value = emptyList()
+    }
+
+    fun setNotificationForwardingEnabled(enabled: Boolean) {
+        configManager.saveNotificationEnabled(enabled)
+        _notificationForwardingEnabled.value = enabled
+        addLog(if (enabled) "通知转发已开启" else "通知转发已关闭")
     }
 
     fun refreshPairedDevices() {
@@ -369,21 +413,28 @@ class InputViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             val success = networkManager.connectToDevice(device)
             if (success) {
+                relayTargetDeviceId = null
+                relayTargetDeviceName = null
+                configManager.saveLastTargetDevice(device.deviceId, device.deviceName)
                 _connectionStatus.value = ConnectionStatus(
                     connected = true,
-                    deviceName = device.deviceName
+                    deviceName = buildLanConnectionName(device.deviceName),
+                    deviceId = device.deviceId,
+                    transport = "lan"
                 )
+                addLog("已连接局域网设备: ${device.deviceName}")
             }
             updateSendAvailability()
         }
     }
 
     fun connectToServerDevice(device: ServerDeviceInfo) {
+        networkManager.disconnect()
         relayTargetDeviceId = device.deviceId
         relayTargetDeviceName = device.deviceName
         configManager.saveLastTargetDevice(device.deviceId, device.deviceName)
         syncSelectedRelayDeviceStatus()
-        addLog("已选择服务器设备: ${device.deviceName}")
+        addLog("已选择远程设备: ${device.deviceName}")
         updateSendAvailability()
     }
 
@@ -495,12 +546,17 @@ class InputViewModel(application: Application) : AndroidViewModel(application) {
                         localIp = localIp,
                         localPort = localPort
                     )
+                    configManager.saveLastTargetDevice(deviceId, deviceName)
+                    relayTargetDeviceId = null
+                    relayTargetDeviceName = null
                     refreshPairedDevices()
                     pendingScannedPair = null
 
                     _connectionStatus.value = ConnectionStatus(
                         connected = true,
-                        deviceName = "$deviceName (局域网)"
+                        deviceName = buildLanConnectionName(deviceName),
+                        deviceId = deviceId,
+                        transport = "lan"
                     )
                     addLog("局域网连接成功")
                     return@launch
@@ -740,6 +796,161 @@ class InputViewModel(application: Application) : AndroidViewModel(application) {
             }
             addLog("局域网图片发送失败")
         }
+    }
+
+    fun retryFailedTextItems() {
+        viewModelScope.launch {
+            val retryableItems = _historyItems.value
+                .filter { it.syncStatus == SyncStatus.FAILED && it.contentType == "text" }
+                .sortedBy { it.timestamp }
+
+            if (retryableItems.isEmpty()) {
+                _uiMessages.tryEmit("没有可重试的失败文本")
+                return@launch
+            }
+
+            var successCount = 0
+            retryableItems.forEach { item ->
+                if (retryTextItem(item)) {
+                    successCount++
+                }
+            }
+
+            _uiMessages.tryEmit("已重试 $successCount/${retryableItems.size} 条失败文本")
+        }
+    }
+
+    fun retryHistoryItem(itemId: String) {
+        viewModelScope.launch {
+            val item = _historyItems.value.firstOrNull { it.id == itemId }
+                ?: _visibleHistoryItems.value.firstOrNull { it.id == itemId }
+
+            if (item == null) {
+                _uiMessages.tryEmit("未找到要重试的记录")
+                return@launch
+            }
+
+            if (item.contentType != "text") {
+                _uiMessages.tryEmit("暂不支持重试图片记录")
+                return@launch
+            }
+
+            retryTextItem(item)
+        }
+    }
+
+    private suspend fun retryTextItem(item: HistoryItem): Boolean {
+        val refreshedAt = System.currentTimeMillis()
+        updateHistoryItem(item.id) { current ->
+            current.copy(
+                timestamp = refreshedAt,
+                syncStatus = SyncStatus.PENDING,
+                serverMessageId = null,
+                storedAt = null,
+                syncedAt = null,
+                errorMessage = null
+            )
+        }
+
+        return if (item.channel == "server") {
+            retryServerTextItem(item)
+        } else {
+            retryLanTextItem(item)
+        }
+    }
+
+    private suspend fun retryServerTextItem(item: HistoryItem): Boolean {
+        val targetId = item.targetDeviceId.ifBlank { relayTargetDeviceId ?: "" }
+        val targetName = item.targetDeviceName.ifBlank { relayTargetDeviceName ?: "远程设备" }
+
+        if (targetId.isBlank()) {
+            markRetryFailed(item.id, "缺少远程目标设备")
+            return false
+        }
+
+        relayTargetDeviceId = targetId
+        relayTargetDeviceName = targetName
+        configManager.saveLastTargetDevice(targetId, targetName)
+        syncSelectedRelayDeviceStatus()
+
+        if (!serverConnection.isConnected()) {
+            markRetryFailed(item.id, "远程连接未就绪")
+            return false
+        }
+
+        val payload = JsonObject().apply {
+            addProperty("type", "TEXT_INPUT")
+            addProperty("text", item.text)
+            addProperty("timestamp", System.currentTimeMillis())
+        }
+
+        return if (serverConnection.sendRelayMessage(targetId, payload)) {
+            pendingRelayHistoryIds.addLast(item.id)
+            addLog("已重试远程发送: $targetName")
+            true
+        } else {
+            markRetryFailed(item.id, "未能重新提交到服务器")
+            false
+        }
+    }
+
+    private suspend fun retryLanTextItem(item: HistoryItem): Boolean {
+        val paired = _pairedDevices.value[item.targetDeviceId]
+        if (paired == null || paired.localIp.isBlank() || paired.localPort <= 0) {
+            markRetryFailed(item.id, "缺少局域网地址，请重新扫码配对")
+            return false
+        }
+
+        val device = Device(
+            deviceId = paired.deviceId,
+            deviceName = paired.deviceName,
+            ip = paired.localIp,
+            port = paired.localPort,
+            version = "1.0.0"
+        )
+
+        val alreadyConnected = networkManager.isConnected.value &&
+            networkManager.connectedDevice.value?.deviceId == device.deviceId
+
+        if (!alreadyConnected) {
+            val success = networkManager.connectToDevice(device)
+            if (!success) {
+                markRetryFailed(item.id, "无法重新连接局域网设备")
+                return false
+            }
+            relayTargetDeviceId = null
+            relayTargetDeviceName = null
+            configManager.saveLastTargetDevice(device.deviceId, device.deviceName)
+            _connectionStatus.value = ConnectionStatus(
+                connected = true,
+                deviceName = buildLanConnectionName(device.deviceName),
+                deviceId = device.deviceId,
+                transport = "lan"
+            )
+        }
+
+        return if (networkManager.sendText(item.text)) {
+            updateHistoryItem(item.id) { current ->
+                current.copy(
+                    timestamp = System.currentTimeMillis(),
+                    syncStatus = SyncStatus.DIRECT,
+                    syncedAt = System.currentTimeMillis(),
+                    errorMessage = null
+                )
+            }
+            addLog("已重试局域网发送: ${device.deviceName}")
+            true
+        } else {
+            markRetryFailed(item.id, "局域网重试发送失败")
+            false
+        }
+    }
+
+    private suspend fun markRetryFailed(itemId: String, message: String) {
+        updateHistoryItem(itemId) { current ->
+            current.copy(syncStatus = SyncStatus.FAILED, errorMessage = message)
+        }
+        addLog(message)
     }
 
     fun onHistoryItemClick(item: HistoryItem) {
@@ -1141,7 +1352,35 @@ class InputViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private fun buildConnectionName(deviceName: String): String {
-        return "$deviceName (服务器中转)"
+        return deviceName
+    }
+
+    private fun buildLanConnectionName(deviceName: String): String {
+        return deviceName
+    }
+
+    private fun syncLanConnectionStatus() {
+        val connectedDevice = networkManager.connectedDevice.value
+        val lanConnected = networkManager.isConnected.value && connectedDevice != null
+
+        if (lanConnected && relayTargetDeviceId == null) {
+            val device = connectedDevice ?: return
+            _connectionStatus.value = ConnectionStatus(
+                connected = true,
+                deviceName = buildLanConnectionName(device.deviceName),
+                deviceId = device.deviceId,
+                transport = "lan"
+            )
+            return
+        }
+
+        if (!lanConnected && _connectionStatus.value.transport == "lan") {
+            if (relayTargetDeviceId != null) {
+                syncSelectedRelayDeviceStatus()
+            } else {
+                _connectionStatus.value = ConnectionStatus(connected = false, deviceName = "")
+            }
+        }
     }
 
     private fun syncSelectedRelayDeviceStatus() {
@@ -1164,18 +1403,31 @@ class InputViewModel(application: Application) : AndroidViewModel(application) {
 
         _connectionStatus.value = ConnectionStatus(
             connected = online,
-            deviceName = buildConnectionName(resolvedName)
+            deviceName = buildConnectionName(resolvedName),
+            deviceId = targetId,
+            transport = "server"
         )
     }
 
     private fun updateSendAvailability() {
         val canSendViaServer = relayTargetDeviceId != null && serverConnection.isConnected()
-        val canSendViaLan = networkManager.isConnected.value
+        val canSendViaLan = networkManager.isConnected.value && relayTargetDeviceId == null
         _sendAvailable.value = canSendViaServer || canSendViaLan
+    }
+
+    override fun onCleared() {
+        NotificationListenerService.onNotificationReceived = null
+        heartbeatJob?.cancel()
+        deviceListRefreshJob?.cancel()
+        serverConnection.release()
+        networkManager.disconnect()
+        super.onCleared()
     }
 
     data class ConnectionStatus(
         val connected: Boolean,
-        val deviceName: String
+        val deviceName: String,
+        val deviceId: String? = null,
+        val transport: String = ""
     )
 }

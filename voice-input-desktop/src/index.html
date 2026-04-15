@@ -19,7 +19,7 @@
                         <input type="checkbox" id="server-mode-toggle">
                         <span class="slider"></span>
                     </label>
-                    <span class="toolbar-label">服务端中转</span>
+                    <span class="toolbar-label">远程连接</span>
                     <span class="server-dot" id="server-dot"></span>
                     <button id="edit-url-btn" class="toolbar-btn" title="编辑服务器地址">✏️</button>
                 </div>
@@ -34,8 +34,10 @@
                 <!-- 设备连接状态 -->
                 <div class="device-status" id="device-status">
                     <span class="status-indicator" id="status-indicator"></span>
-                    <span id="status-text">等待连接</span>
-                    <span id="device-name" style="display:none;"></span>
+                    <div class="device-status-copy">
+                        <span id="status-text">未配对</span>
+                        <span id="device-name" style="display:none;"></span>
+                    </div>
                     <button id="unpair-btn" class="toolbar-btn unpair-btn" style="display:none;" title="取消配对">✕</button>
                 </div>
             </div>
@@ -47,6 +49,7 @@
             <input type="text" id="server-url" placeholder="wss://your-server:7070">
             <span class="url-hint">按回车连接</span>
         </div>
+        <div id="event-banner" class="event-banner" style="display:none;"></div>
 
         <!-- 主内容区 -->
         <div class="main-content">
@@ -56,26 +59,56 @@
                     <!-- 二维码 -->
                     <div class="qr-area" id="qr-area" style="display:none;">
                         <img id="qr-code-img" alt="配对二维码" />
-                        <button id="refresh-qr-btn" class="btn-small">刷新二维码</button>
+                        <div class="qr-actions">
+                            <button id="refresh-qr-btn" class="btn-small">刷新二维码</button>
+                            <button id="copy-pairing-btn" class="btn-small">复制配对信息</button>
+                            <button id="copy-server-url-btn" class="btn-small">复制服务器地址</button>
+                        </div>
                     </div>
                     <!-- 使用说明 -->
                     <div class="guide-area">
-                        <h2>快速开始</h2>
-                        <div class="steps">
-                            <div class="step">
-                                <span class="step-num">1</span>
-                                <span>打开顶部服务端中转开关，等待连接成功（绿色圆点）</span>
+                        <h2>连接电脑</h2>
+                        <p class="guide-note emphasis">二维码一直可用。同一 Wi‑Fi 直接扫码；跨网络时再打开顶部“远程连接”。</p>
+                        <div class="guide-paths">
+                            <div class="guide-card">
+                                <div class="guide-card-title">同一 Wi‑Fi</div>
+                                <div class="steps compact">
+                                    <div class="step">
+                                        <span class="step-num">1</span>
+                                        <span>打开手机 App，进入扫码页</span>
+                                    </div>
+                                    <div class="step">
+                                        <span class="step-num">2</span>
+                                        <span>直接扫描左侧二维码完成配对</span>
+                                    </div>
+                                    <div class="step">
+                                        <span class="step-num">3</span>
+                                        <span>手机输入、语音识别或发图后，电脑会立即接收</span>
+                                    </div>
+                                </div>
                             </div>
-                            <div class="step">
-                                <span class="step-num">2</span>
-                                <span>用手机 App 扫描左侧二维码完成配对</span>
-                            </div>
-                            <div class="step">
-                                <span class="step-num">3</span>
-                                <span>在手机上输入或语音输入文字，电脑自动接收</span>
+                            <div class="guide-card remote">
+                                <div class="guide-card-title">远程连接</div>
+                                <div class="steps compact">
+                                    <div class="step">
+                                        <span class="step-num">1</span>
+                                        <span>打开顶部“远程连接”，等待圆点变绿</span>
+                                    </div>
+                                    <div class="step">
+                                        <span class="step-num">2</span>
+                                        <span>需要自定义地址时，点铅笔修改服务器地址</span>
+                                    </div>
+                                    <div class="step">
+                                        <span class="step-num">3</span>
+                                        <span>手机扫码或粘贴配对信息后即可跨网络连接</span>
+                                    </div>
+                                </div>
                             </div>
                         </div>
-                        <p class="guide-note">支持局域网直连和服务器中转两种模式</p>
+                        <p class="guide-note">相机不可用时，可在手机端从剪贴板导入电脑端复制的配对信息。</p>
+                        <div class="guide-actions">
+                            <button id="back-to-history-btn" class="btn-small" style="display:none;">返回记录</button>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -85,15 +118,22 @@
                 <div class="history-header">
                     <span>📝 接收记录</span>
                     <div class="history-actions">
-                        <button id="toggle-ai-panel-btn" class="btn-small">AI 报告</button>
-                        <button id="toggle-ai-settings-btn" class="btn-small">AI 设置</button>
+                        <button id="show-pairing-btn" class="btn-small">新增手机</button>
                         <button id="export-week-btn" class="btn-small">导出本周</button>
                         <button id="export-month-btn" class="btn-small">导出本月</button>
+                        <button id="toggle-advanced-tools-btn" class="btn-small">高级工具</button>
+                    </div>
+                </div>
+                <div id="advanced-tools-panel" class="advanced-tools-panel" style="display:none;">
+                    <div class="advanced-tools-row">
+                        <button id="toggle-ai-panel-btn" class="btn-small">AI 报告</button>
+                        <button id="toggle-ai-settings-btn" class="btn-small">AI 设置</button>
                         <input type="date" id="export-start-date" class="date-input">
                         <input type="date" id="export-end-date" class="date-input">
                         <button id="export-range-btn" class="btn-small">导出区间</button>
-                        <button id="clear-history-btn" class="btn-small">清空</button>
+                        <button id="clear-history-btn" class="btn-small btn-danger">清空记录</button>
                     </div>
+                    <div class="advanced-tools-hint">AI 报告、区间导出和清空操作统一收在这里，主界面只保留高频动作。</div>
                 </div>
                 <div id="ai-report-panel" class="ai-report-panel" style="display:none;">
                     <div class="ai-panel-toolbar">

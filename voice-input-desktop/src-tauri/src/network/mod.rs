@@ -227,6 +227,51 @@ async fn handle_server_messages(
                     handle.emit("relay_stored", &msg).unwrap_or(());
                 }
             }
+            "NOTIFICATION_FORWARD" => {
+                let from_id = msg
+                    .get("from_device_id")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("unknown");
+                let from_name = msg
+                    .get("from_device_name")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or(from_id);
+                let received_at = chrono::Utc::now().timestamp_millis();
+                let message_id = format!("notification-{}", Uuid::new_v4());
+                let notification = msg.get("notification").cloned().unwrap_or_else(|| serde_json::json!({}));
+                let history_payload = serde_json::json!({
+                    "type": "NOTIFICATION_FORWARD",
+                    "app_name": notification.get("app_name").and_then(|v| v.as_str()).unwrap_or("通知"),
+                    "title": notification.get("title").and_then(|v| v.as_str()).unwrap_or(""),
+                    "text": notification.get("text").and_then(|v| v.as_str()).unwrap_or(""),
+                    "timestamp": notification.get("timestamp").and_then(|v| v.as_i64()).unwrap_or(received_at)
+                });
+
+                if let Some(ref handle) = app_handle {
+                    if let Some(record) = build_history_record(
+                        message_id,
+                        from_id,
+                        from_name,
+                        &history_payload,
+                        "server",
+                        "live",
+                        received_at,
+                    ) {
+                        emit_history_record(handle, record);
+                    }
+                    handle
+                        .emit(
+                            "notification_received",
+                            &serde_json::json!({
+                                "from_device_id": from_id,
+                                "from_device_name": from_name,
+                                "notification": notification,
+                                "received_at": received_at
+                            }),
+                        )
+                        .unwrap_or(());
+                }
+            }
             "HEARTBEAT" => {
                 // Ignore server heartbeat response
             }
@@ -484,6 +529,37 @@ fn build_history_record(
                 from_device_name: from_device_name.to_string(),
                 content_type: "image".to_string(),
                 content: format!("[图片] {}", file_name),
+                sent_at,
+                received_at,
+                via: via.to_string(),
+                delivery_mode: delivery_mode.to_string(),
+            })
+        }
+        "NOTIFICATION_FORWARD" => {
+            let app_name = payload
+                .get("app_name")
+                .and_then(|v| v.as_str())
+                .unwrap_or("通知");
+            let title = payload
+                .get("title")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            let text = payload
+                .get("text")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            let summary = [app_name, title, text]
+                .into_iter()
+                .filter(|value| !value.is_empty())
+                .collect::<Vec<_>>()
+                .join(" | ");
+
+            Some(NewHistoryRecord {
+                id,
+                from_device_id: from_device_id.to_string(),
+                from_device_name: from_device_name.to_string(),
+                content_type: "notification".to_string(),
+                content: format!("[通知] {}", summary),
                 sent_at,
                 received_at,
                 via: via.to_string(),

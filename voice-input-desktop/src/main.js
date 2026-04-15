@@ -10,6 +10,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     const editUrlBtn = document.getElementById('edit-url-btn');
     const urlBar = document.getElementById('url-bar');
     const serverUrlInput = document.getElementById('server-url');
+    const eventBanner = document.getElementById('event-banner');
 
     const statusIndicator = document.getElementById('status-indicator');
     const statusText = document.getElementById('status-text');
@@ -21,6 +22,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     const qrArea = document.getElementById('qr-area');
     const qrCodeImg = document.getElementById('qr-code-img');
     const refreshQrBtn = document.getElementById('refresh-qr-btn');
+    const copyPairingBtn = document.getElementById('copy-pairing-btn');
+    const copyServerUrlBtn = document.getElementById('copy-server-url-btn');
     const historyList = document.getElementById('history-list');
     const historyEmpty = document.getElementById('history-empty');
     const historyPagination = document.getElementById('history-pagination');
@@ -32,6 +35,10 @@ document.addEventListener('DOMContentLoaded', async () => {
     const exportEndDate = document.getElementById('export-end-date');
     const exportRangeBtn = document.getElementById('export-range-btn');
     const clearHistoryBtn = document.getElementById('clear-history-btn');
+    const toggleAdvancedToolsBtn = document.getElementById('toggle-advanced-tools-btn');
+    const advancedToolsPanel = document.getElementById('advanced-tools-panel');
+    const showPairingBtn = document.getElementById('show-pairing-btn');
+    const backToHistoryBtn = document.getElementById('back-to-history-btn');
     const toggleAiPanelBtn = document.getElementById('toggle-ai-panel-btn');
     const toggleAiSettingsBtn = document.getElementById('toggle-ai-settings-btn');
     const aiReportPanel = document.getElementById('ai-report-panel');
@@ -56,6 +63,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     let pairedDeviceName = null;    // 配对设备名称
     let isPaired = false;        // 已配对（有配对设备记录）
     let isDeviceOnline = false;  // 配对设备在线
+    let hasConnectedDeviceBefore = false;
     let serverStatus = 'disconnected';
     let serverReconnectTimer = null;
     let serverConnectInFlight = false;
@@ -75,17 +83,140 @@ document.addEventListener('DOMContentLoaded', async () => {
     let aiReportIgnoreScrollEvent = false;
     const AI_REPORT_SCROLL_THRESHOLD = 24;
 
+    function getUnpairedDetail() {
+        if (!serverModeToggle.checked) {
+            return '左侧二维码一直可扫，手机也可粘贴配对信息';
+        }
+        if (serverStatus === 'connected') {
+            return '左侧二维码一直可扫，跨网络也能连接';
+        }
+        if (serverStatus === 'connecting') {
+            return '远程连接中，同一 Wi-Fi 也可以先扫码';
+        }
+        return '左侧二维码一直可扫；跨网络前先打开远程连接';
+    }
+
+    function getHistoryEmptyMessage() {
+        if (isDeviceOnline) {
+            return '已连接，可直接从手机发送文字、语音或图片';
+        }
+        if (isPaired) {
+            if (hasConnectedDeviceBefore) {
+                return '手机暂时离线，重新打开 App 后内容会继续显示在这里';
+            }
+            return '已配对，打开手机 App 后发送的内容会显示在这里';
+        }
+        return '先扫码配对，接收记录会显示在这里';
+    }
+
+    function refreshHistoryEmptyState() {
+        if (historyRecords.length > 0) {
+            return;
+        }
+        historyList.innerHTML = `<div class="history-empty" id="history-empty">${escapeHtml(getHistoryEmptyMessage())}</div>`;
+        historyList.scrollTop = 0;
+        updateHistoryPagination();
+    }
+
+    function renderToolbarStatus() {
+        const pairedName = pairedDeviceName || '已配对设备';
+        let tone = 'idle';
+        let title = '未配对';
+        let detail = getUnpairedDetail();
+        let showUnpair = false;
+
+        if (isDeviceOnline) {
+            tone = 'connected';
+            title = '已连接，可直接输入';
+            detail = [
+                pairedDeviceName || '已连接设备',
+                '手机发送后会立即显示在记录里'
+            ].filter(Boolean).join(' · ');
+            showUnpair = true;
+        } else if (isPaired) {
+            showUnpair = true;
+            if (hasConnectedDeviceBefore) {
+                tone = 'offline';
+                title = '已配对，手机暂时离线';
+                detail = `${pairedName} · 重新打开手机 App 后会自动恢复`;
+            } else {
+                tone = 'paired';
+                title = '已配对，等待手机连接';
+                detail = serverModeToggle.checked && serverStatus === 'connected'
+                    ? `${pairedName} · 手机打开 App 后可直接跨网络输入`
+                    : `${pairedName} · 打开手机 App 后即可开始输入`;
+            }
+        }
+
+        statusIndicator.className = 'status-indicator';
+        statusIndicator.classList.add(tone);
+        statusText.textContent = title;
+        deviceNameEl.textContent = detail;
+        deviceNameEl.style.display = detail ? 'block' : 'none';
+        unpairBtn.style.display = showUnpair ? 'inline-flex' : 'none';
+        refreshHistoryEmptyState();
+    }
+
     // ===== 视图切换 =====
     function switchToHistoryView() {
         pairingSection.style.display = 'none';
         historySection.style.display = 'flex';
+        syncPairingActionVisibility();
     }
 
     function switchToPairingView() {
         pairingSection.style.display = 'flex';
         historySection.style.display = 'none';
-        if (serverStatus === 'connected') {
-            loadQrCode();
+        loadQrCode();
+        syncPairingActionVisibility();
+    }
+
+    function syncPairingActionVisibility() {
+        if (backToHistoryBtn) {
+            backToHistoryBtn.style.display = isPaired ? 'inline-flex' : 'none';
+        }
+    }
+
+    function setAdvancedToolsVisible(visible) {
+        advancedToolsPanel.style.display = visible ? 'block' : 'none';
+        toggleAdvancedToolsBtn.classList.toggle('active', visible);
+        if (!visible) {
+            toggleAiPanel(false);
+        }
+    }
+
+    function showEventBanner(message, tone = '', durationMs = 4500) {
+        if (!eventBanner) return;
+        eventBanner.textContent = message || '';
+        eventBanner.className = 'event-banner';
+        if (tone) {
+            eventBanner.classList.add(tone);
+        }
+        eventBanner.style.display = message ? 'block' : 'none';
+        if (!message) return;
+
+        window.clearTimeout(showEventBanner.timer);
+        showEventBanner.timer = window.setTimeout(() => {
+            eventBanner.style.display = 'none';
+        }, durationMs);
+    }
+
+    async function copyTextToClipboard(content, successMessage) {
+        try {
+            if (navigator.clipboard?.writeText) {
+                await navigator.clipboard.writeText(content);
+            } else {
+                const tempTextArea = document.createElement('textarea');
+                tempTextArea.value = content;
+                document.body.appendChild(tempTextArea);
+                tempTextArea.select();
+                document.execCommand('copy');
+                document.body.removeChild(tempTextArea);
+            }
+            showEventBanner(successMessage);
+        } catch (error) {
+            console.error('❌ 复制失败:', error);
+            showEventBanner('复制失败，请稍后重试', 'error');
         }
     }
 
@@ -129,6 +260,9 @@ document.addEventListener('DOMContentLoaded', async () => {
         const shouldOpen = typeof forceOpen === 'boolean'
             ? forceOpen
             : aiReportPanel.style.display === 'none';
+        if (shouldOpen) {
+            setAdvancedToolsVisible(true);
+        }
         aiReportPanel.style.display = shouldOpen ? 'grid' : 'none';
         if (!shouldOpen) {
             setAiSettingsVisible(false);
@@ -491,13 +625,12 @@ document.addEventListener('DOMContentLoaded', async () => {
         if (status === 'connected' && !isPaired) {
             loadQrCode();
         }
-        if (status !== 'connected') {
-            qrArea.style.display = 'none';
-        }
 
         if (status === 'connected') {
             clearServerReconnectTimer();
         }
+
+        renderToolbarStatus();
     }
 
     function clearServerReconnectTimer() {
@@ -549,37 +682,42 @@ document.addEventListener('DOMContentLoaded', async () => {
     function onDeviceConnected(name, devId) {
         isPaired = true;
         isDeviceOnline = true;
-        statusIndicator.classList.add('connected');
-        statusText.textContent = '已连接';
-        deviceNameEl.textContent = name || '';
-        deviceNameEl.style.display = name ? 'inline' : 'none';
-        unpairBtn.style.display = 'inline';
-        if (devId) connectedDeviceId = devId;
+        hasConnectedDeviceBefore = true;
+        if (name) pairedDeviceName = name;
+        if (devId) {
+            connectedDeviceId = devId;
+            pairedDeviceId = devId;
+        }
+        renderToolbarStatus();
         switchToHistoryView();
     }
 
     function onDeviceDisconnected() {
         isDeviceOnline = false;
-        statusIndicator.classList.remove('connected');
 
         invoke('get_config').then(config => {
             if (config.paired_devices && config.paired_devices.length > 0) {
                 isPaired = true;
-                statusText.textContent = '设备离线';
+                const firstDevice = config.paired_devices[0];
+                pairedDeviceId = firstDevice.device_id || pairedDeviceId;
+                connectedDeviceId = pairedDeviceId || connectedDeviceId;
+                pairedDeviceName = firstDevice.device_name || pairedDeviceName;
             } else {
                 isPaired = false;
                 connectedDeviceId = null;
-                statusText.textContent = '等待连接';
-                deviceNameEl.style.display = 'none';
-                unpairBtn.style.display = 'none';
+                pairedDeviceId = null;
+                pairedDeviceName = null;
+                hasConnectedDeviceBefore = false;
                 switchToPairingView();
             }
+            renderToolbarStatus();
         }).catch(() => {
             isPaired = false;
             connectedDeviceId = null;
-            statusText.textContent = '等待连接';
-            deviceNameEl.style.display = 'none';
-            unpairBtn.style.display = 'none';
+            pairedDeviceId = null;
+            pairedDeviceName = null;
+            hasConnectedDeviceBefore = false;
+            renderToolbarStatus();
             switchToPairingView();
         });
     }
@@ -593,11 +731,13 @@ document.addEventListener('DOMContentLoaded', async () => {
             const name = event.payload?.device_name || 'Android设备';
             const devId = event.payload?.device_id || null;
             onDeviceConnected(name, devId);
+            showEventBanner(`设备已连接：${name}`);
         });
 
         tauriEvent.listen('device_disconnected', (event) => {
             console.log('📱 设备断开事件:', JSON.stringify(event));
             onDeviceDisconnected();
+            showEventBanner('设备已离线，仍可继续查看记录', 'error');
         });
 
         tauriEvent.listen('text_received', (event) => {
@@ -605,7 +745,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             const text = event.payload?.text || '';
             const deliveryMode = event.payload?.delivery_mode || 'live';
             if (text && deliveryMode !== 'offline_sync' && !isDeviceOnline) {
-                onDeviceConnected(deviceNameEl.textContent || 'Android设备', connectedDeviceId);
+                onDeviceConnected(pairedDeviceName || 'Android设备', connectedDeviceId || pairedDeviceId);
             }
         });
 
@@ -618,6 +758,17 @@ document.addEventListener('DOMContentLoaded', async () => {
 
         tauriEvent.listen('relay_stored', (event) => {
             console.log('📥 服务器已暂存消息:', JSON.stringify(event));
+            showEventBanner('设备离线，消息已暂存到服务器');
+        });
+
+        tauriEvent.listen('notification_received', (event) => {
+            const notification = event.payload?.notification || {};
+            const summary = [
+                notification.app_name || notification.appName,
+                notification.title,
+                notification.text
+            ].filter(Boolean).join(' | ');
+            showEventBanner(summary || '收到一条通知');
         });
 
         tauriEvent.listen('openai_report_delta', (event) => {
@@ -633,17 +784,21 @@ document.addEventListener('DOMContentLoaded', async () => {
             console.log('✅ 配对成功事件:', JSON.stringify(event));
             const data = event.payload;
             pairedDeviceId = data.device_id;
+            connectedDeviceId = data.device_id;
             pairedDeviceName = data.device_name;
-            deviceNameEl.textContent = '已连接：' + data.device_name;
-            deviceNameEl.style.display = 'block';
-            unpairBtn.style.display = 'block';
+            isPaired = true;
+            isDeviceOnline = false;
+            hasConnectedDeviceBefore = false;
+            renderToolbarStatus();
             switchToHistoryView();
+            showEventBanner(`配对成功：${data.device_name}`);
         });
 
         // 监听配对失败事件
         tauriEvent.listen('pair_failed', (event) => {
             console.log('❌ 配对失败事件:', JSON.stringify(event));
             const data = event.payload;
+            showEventBanner(`配对失败：${data.message || '未知错误'}`, 'error');
             alert('配对失败：' + (data.message || '未知错误'));
         });
 
@@ -678,13 +833,20 @@ document.addEventListener('DOMContentLoaded', async () => {
         if (config.paired_devices && config.paired_devices.length > 0) {
             isPaired = true;
             const firstDevice = config.paired_devices[0];
+            pairedDeviceId = firstDevice.device_id;
+            pairedDeviceName = firstDevice.device_name || null;
             connectedDeviceId = firstDevice.device_id;
             switchToHistoryView();
-            statusText.textContent = '等待设备上线';
-            deviceNameEl.textContent = firstDevice.device_name || '';
-            deviceNameEl.style.display = firstDevice.device_name ? 'inline' : 'none';
-            unpairBtn.style.display = 'inline';
+        } else {
+            isPaired = false;
+            pairedDeviceId = null;
+            pairedDeviceName = null;
+            connectedDeviceId = null;
+            isDeviceOnline = false;
+            hasConnectedDeviceBefore = false;
+            switchToPairingView();
         }
+        renderToolbarStatus();
 
         // 3. 连接服务器（事件监听器已就绪，不会丢失 PAIRED_DEVICE_ONLINE）
         if (config.server_mode_enabled) {
@@ -707,11 +869,15 @@ document.addEventListener('DOMContentLoaded', async () => {
                 await invoke('disconnect_server');
                 setServerDot('disconnected');
                 urlBar.style.display = 'none';
-                qrArea.style.display = 'none';
+                if (!isPaired) {
+                    loadQrCode();
+                }
             }
+            renderToolbarStatus();
         } catch (error) {
             console.error('❌ 设置服务器模式失败:', error);
             e.target.checked = !enabled;
+            renderToolbarStatus();
         }
     });
 
@@ -720,6 +886,19 @@ document.addEventListener('DOMContentLoaded', async () => {
         const showing = urlBar.style.display !== 'none';
         urlBar.style.display = showing ? 'none' : 'flex';
         if (!showing) serverUrlInput.focus();
+    });
+
+    toggleAdvancedToolsBtn.addEventListener('click', () => {
+        const nextVisible = advancedToolsPanel.style.display === 'none';
+        setAdvancedToolsVisible(nextVisible);
+    });
+
+    showPairingBtn.addEventListener('click', () => {
+        switchToPairingView();
+    });
+
+    backToHistoryBtn.addEventListener('click', () => {
+        switchToHistoryView();
     });
 
     toggleAiPanelBtn.addEventListener('click', () => {
@@ -750,6 +929,25 @@ document.addEventListener('DOMContentLoaded', async () => {
             setAiReportStatus(message, 'error');
             alert(`保存 OpenAI 配置失败：${message}`);
         }
+    });
+
+    copyPairingBtn.addEventListener('click', async () => {
+        try {
+            const payload = await invoke('get_pairing_payload');
+            await copyTextToClipboard(payload, '配对信息已复制，可直接在手机端导入');
+        } catch (error) {
+            console.error('❌ 复制配对信息失败:', error);
+            showEventBanner('复制配对信息失败', 'error');
+        }
+    });
+
+    copyServerUrlBtn.addEventListener('click', async () => {
+        const url = serverUrlInput.value.trim();
+        if (!url) {
+            showEventBanner('当前没有可复制的服务器地址', 'error');
+            return;
+        }
+        await copyTextToClipboard(url, '服务器地址已复制');
     });
 
     aiReportOutput.addEventListener('scroll', () => {
@@ -794,17 +992,19 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     // ===== 取消配对 =====
     unpairBtn.addEventListener('click', async () => {
-        if (!connectedDeviceId) return;
+        const targetDeviceId = pairedDeviceId || connectedDeviceId;
+        if (!targetDeviceId) return;
         try {
-            await invoke('unpair_device', { deviceId: connectedDeviceId });
+            await invoke('unpair_device', { deviceId: targetDeviceId });
             isPaired = false;
             isDeviceOnline = false;
+            hasConnectedDeviceBefore = false;
             connectedDeviceId = null;
-            statusIndicator.classList.remove('connected');
-            statusText.textContent = '等待连接';
-            deviceNameEl.style.display = 'none';
-            unpairBtn.style.display = 'none';
+            pairedDeviceId = null;
+            pairedDeviceName = null;
+            renderToolbarStatus();
             switchToPairingView();
+            showEventBanner('已取消配对，可重新扫码连接');
         } catch (e) {
             console.error('❌ 取消配对失败:', e);
         }
@@ -863,7 +1063,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     function renderHistory({ mode = 'reset', scrollSnapshot = captureHistoryScrollSnapshot(), forceScrollTop = false } = {}) {
         if (!historyRecords.length) {
-            historyList.innerHTML = '<div class="history-empty" id="history-empty">等待手机发送文字...</div>';
+            historyList.innerHTML = `<div class="history-empty" id="history-empty">${escapeHtml(getHistoryEmptyMessage())}</div>`;
             historyList.scrollTop = 0;
             updateHistoryPagination();
             return;
@@ -1045,6 +1245,7 @@ document.addEventListener('DOMContentLoaded', async () => {
                 label
             });
             const savedPath = result?.saved_path || result?.savedPath;
+            showEventBanner(savedPath ? `导出完成：${savedPath}` : '导出完成');
             if (savedPath) {
                 alert(`导出完成：\n${savedPath}`);
             } else {
@@ -1052,6 +1253,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             }
         } catch (error) {
             console.error('❌ 导出历史记录失败:', error);
+            showEventBanner('导出失败，请查看控制台日志', 'error');
             alert('导出失败，请查看控制台日志');
         }
     }
@@ -1064,8 +1266,10 @@ document.addEventListener('DOMContentLoaded', async () => {
             historyInitialLoaded = true;
             historyCursor = null;
             renderHistory({ mode: 'reset' });
+            showEventBanner('历史记录已清空');
         } catch (error) {
             console.error('❌ 清空历史记录失败:', error);
+            showEventBanner('清空历史记录失败', 'error');
         }
     });
 

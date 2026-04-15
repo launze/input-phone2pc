@@ -344,18 +344,7 @@ async fn unpair_device(device_id: String) -> Result<(), String> {
 
 #[tauri::command]
 fn generate_pairing_qr() -> Result<String, String> {
-    let config = AppConfig::load();
-
-    let local_ip = network::discovery::get_local_ip().unwrap_or_default();
-    let qr_data = serde_json::json!({
-        "type": "VOICEINPUT_PAIR",
-        "server_url": config.server_url,
-        "device_id": config.device_id,
-        "device_name": config.device_name,
-        "local_ip": local_ip,
-        "local_port": 58889
-    });
-    let qr_json = serde_json::to_string(&qr_data).map_err(|e| e.to_string())?;
+    let qr_json = build_pairing_payload()?;
 
     // Generate QR code
     use image::Luma;
@@ -380,6 +369,25 @@ fn generate_pairing_qr() -> Result<String, String> {
     Ok(format!("data:image/png;base64,{}", b64))
 }
 
+#[tauri::command]
+fn get_pairing_payload() -> Result<String, String> {
+    build_pairing_payload()
+}
+
+fn build_pairing_payload() -> Result<String, String> {
+    let config = AppConfig::load();
+    let local_ip = network::discovery::get_local_ip().unwrap_or_default();
+    let qr_data = serde_json::json!({
+        "type": "VOICEINPUT_PAIR",
+        "server_url": config.server_url,
+        "device_id": config.device_id,
+        "device_name": config.device_name,
+        "local_ip": local_ip,
+        "local_port": 58889
+    });
+    serde_json::to_string(&qr_data).map_err(|e| e.to_string())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -401,6 +409,7 @@ pub fn run() {
             set_encryption_key,
             send_encrypted_message,
             generate_pairing_qr,
+            get_pairing_payload,
             unpair_device
         ])
         .setup(|app| {

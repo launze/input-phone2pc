@@ -47,6 +47,7 @@ import com.voiceinput.data.model.HistoryItem
 import com.voiceinput.data.model.SyncStatus
 import com.voiceinput.ui.components.HistoryItemView
 import com.voiceinput.viewmodel.InputViewModel
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -64,6 +65,9 @@ fun HistoryScreen(
     var pendingExportFormat by remember { mutableStateOf("txt") }
     var pendingExportFileName by remember { mutableStateOf<String?>(null) }
     var pendingExportItems by remember { mutableStateOf<List<HistoryItem>>(emptyList()) }
+    val retryableTextCount = remember(historyItems) {
+        historyItems.count { it.syncStatus == SyncStatus.FAILED && it.contentType == "text" }
+    }
 
     val filteredItems = remember(historyItems, selectedTab) {
         if (selectedTab == 1) {
@@ -96,6 +100,12 @@ fun HistoryScreen(
 
     LaunchedEffect(Unit) {
         viewModel.reloadHistory()
+    }
+
+    LaunchedEffect(Unit) {
+        viewModel.uiMessages.collectLatest { message ->
+            snackbarHostState.showSnackbar(message)
+        }
     }
 
     DisposableEffect(Unit) {
@@ -171,39 +181,49 @@ fun HistoryScreen(
                 )
             }
 
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                ExportButton(
-                    label = "TXT",
-                    enabled = filteredItems.isNotEmpty(),
-                    modifier = Modifier.weight(1f)
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedButton(
+                    onClick = { viewModel.retryFailedTextItems() },
+                    enabled = retryableTextCount > 0,
+                    modifier = Modifier.fillMaxWidth()
                 ) {
-                    pendingExportFormat = "txt"
-                    pendingExportItems = filteredItems
-                    pendingExportFileName = viewModel.suggestedHistoryExportFileName("txt")
-                    exportLauncher.launch(pendingExportFileName)
+                    Text("重试失败文本 ($retryableTextCount)")
                 }
-                ExportButton(
-                    label = "MD",
-                    enabled = filteredItems.isNotEmpty(),
-                    modifier = Modifier.weight(1f)
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    pendingExportFormat = "md"
-                    pendingExportItems = filteredItems
-                    pendingExportFileName = viewModel.suggestedHistoryExportFileName("md")
-                    exportLauncher.launch(pendingExportFileName)
-                }
-                ExportButton(
-                    label = "CSV",
-                    enabled = filteredItems.isNotEmpty(),
-                    modifier = Modifier.weight(1f)
-                ) {
-                    pendingExportFormat = "csv"
-                    pendingExportItems = filteredItems
-                    pendingExportFileName = viewModel.suggestedHistoryExportFileName("csv")
-                    exportLauncher.launch(pendingExportFileName)
+                    ExportButton(
+                        label = "TXT",
+                        enabled = filteredItems.isNotEmpty(),
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        pendingExportFormat = "txt"
+                        pendingExportItems = filteredItems
+                        pendingExportFileName = viewModel.suggestedHistoryExportFileName("txt")
+                        exportLauncher.launch(pendingExportFileName)
+                    }
+                    ExportButton(
+                        label = "MD",
+                        enabled = filteredItems.isNotEmpty(),
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        pendingExportFormat = "md"
+                        pendingExportItems = filteredItems
+                        pendingExportFileName = viewModel.suggestedHistoryExportFileName("md")
+                        exportLauncher.launch(pendingExportFileName)
+                    }
+                    ExportButton(
+                        label = "CSV",
+                        enabled = filteredItems.isNotEmpty(),
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        pendingExportFormat = "csv"
+                        pendingExportItems = filteredItems
+                        pendingExportFileName = viewModel.suggestedHistoryExportFileName("csv")
+                        exportLauncher.launch(pendingExportFileName)
+                    }
                 }
             }
 
@@ -260,6 +280,14 @@ fun HistoryScreen(
                             onClick = {
                                 viewModel.onHistoryItemClick(item)
                                 onBack()
+                            },
+                            onRetry = if (
+                                item.syncStatus == SyncStatus.FAILED &&
+                                item.contentType == "text"
+                            ) {
+                                { viewModel.retryHistoryItem(item.id) }
+                            } else {
+                                null
                             },
                             onDelete = { viewModel.deleteHistoryItem(item.id) }
                         )

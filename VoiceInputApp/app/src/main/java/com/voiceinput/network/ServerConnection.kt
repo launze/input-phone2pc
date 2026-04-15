@@ -4,6 +4,7 @@ import android.content.Context
 import android.util.Log
 import com.google.gson.Gson
 import com.google.gson.JsonObject
+import com.voiceinput.data.model.NotificationData
 import com.voiceinput.data.model.ServerDeviceInfo
 import com.voiceinput.data.model.ServerMsg
 import com.voiceinput.data.model.ServerConfig
@@ -284,6 +285,28 @@ class ServerConnection(private val context: Context) {
             addProperty("from_device_id", registeredDeviceId ?: "")
             addProperty("to_device_id", toDeviceId)
             add("payload", payload)
+        }
+        return sendRaw(json.toString())
+    }
+
+    fun sendNotificationForward(toDeviceId: String, notification: NotificationData): Boolean {
+        val json = JsonObject().apply {
+            addProperty("type", "NOTIFICATION_FORWARD")
+            addProperty("from_device_id", registeredDeviceId ?: "")
+            addProperty("to_device_id", toDeviceId)
+            add(
+                "notification",
+                JsonObject().apply {
+                    addProperty("app_name", notification.appName)
+                    addProperty("app_package", notification.appPackage)
+                    addProperty("title", notification.title)
+                    addProperty("text", notification.text)
+                    addProperty("timestamp", notification.timestamp)
+                    if (notification.icon != null) {
+                        addProperty("icon", notification.icon)
+                    }
+                }
+            )
         }
         return sendRaw(json.toString())
     }
