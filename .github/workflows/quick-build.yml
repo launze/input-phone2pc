@@ -16,7 +16,7 @@ jobs:
     - uses: actions/checkout@v4
     
     - name: Setup Rust
-      uses: dtolnay/rust-toolchain@stable
+      uses: dtolnay/rust-toolchain@nightly
     
     - name: Build Server
       working-directory: voice-input-server
@@ -63,7 +63,7 @@ jobs:
         cache-dependency-path: voice-input-desktop/package-lock.json
     
     - name: Setup Rust
-      uses: dtolnay/rust-toolchain@stable
+      uses: dtolnay/rust-toolchain@nightly
     
     - name: Install dependencies
       run: |
