@@ -247,18 +247,20 @@ fun InputScreen(
                 .fillMaxSize()
                 .padding(paddingValues)
         ) {
-            StatusActionCard(
-                connectionStatus = connectionStatus,
-                pairedDeviceCount = pairedDevices.size,
-                localDeviceCount = discoveredDevices.size,
-                retryableTextCount = retryableVisibleTextCount,
-                onSelectDevice = { showDeviceDialog = true },
-                onRetryFailed = { viewModel.retryFailedTextItems() },
-                onStartPairing = onNavigateToScanner,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 12.dp)
-            )
+            if (!connectionStatus.connected) {
+                DisconnectedStatusCard(
+                    connectionStatus = connectionStatus,
+                    pairedDeviceCount = pairedDevices.size,
+                    localDeviceCount = discoveredDevices.size,
+                    retryableTextCount = retryableVisibleTextCount,
+                    onSelectDevice = { showDeviceDialog = true },
+                    onRetryFailed = { viewModel.retryFailedTextItems() },
+                    onStartPairing = onNavigateToScanner,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 12.dp)
+                )
+            }
 
             AnimatedContent(
                 targetState = historyItems.isEmpty(),
@@ -295,9 +297,9 @@ fun InputScreen(
                                     connectionStatus.connected ->
                                         "发送后的文字、图片和通知状态会显示在这里。"
                                     connectionStatus.deviceName.isNotBlank() ->
-                                        "下一步：点上方状态卡里的“切换电脑”，或等待这台电脑重新上线。"
+                                        "下一步：点击右上角电脑按钮切换设备，或等待这台电脑重新上线。"
                                     pairedDevices.isNotEmpty() ->
-                                        "下一步：点上方状态卡里的“选择电脑”，或扫码新增一台。"
+                                        "下一步：点击右上角电脑按钮选择设备，或扫码新增一台。"
                                     else ->
                                         "下一步：打开电脑端二维码，点击上方“扫码配对”。"
                                 },
@@ -467,6 +469,124 @@ private fun createCameraOutputUri(context: Context): Uri {
         "${context.packageName}.fileprovider",
         imageFile
     )
+}
+
+@Composable
+private fun DisconnectedStatusCard(
+    connectionStatus: InputViewModel.ConnectionStatus,
+    pairedDeviceCount: Int,
+    localDeviceCount: Int,
+    retryableTextCount: Int,
+    onSelectDevice: () -> Unit,
+    onRetryFailed: () -> Unit,
+    onStartPairing: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val hasCurrentTarget = connectionStatus.deviceName.isNotBlank()
+    val primaryActionLabel = when {
+        pairedDeviceCount == 0 -> "立即扫码连接"
+        !hasCurrentTarget -> "选择电脑"
+        else -> "切换电脑"
+    }
+    val primaryActionDescription = when {
+        hasCurrentTarget ->
+            "当前目标：${connectionStatus.deviceName}"
+        pairedDeviceCount > 0 ->
+            "已保存 $pairedDeviceCount 台电脑，下一步先选一台"
+        localDeviceCount > 0 ->
+            "发现 $localDeviceCount 台附近电脑，仍需先扫码建立配对"
+        else ->
+            "第一次使用时，请先打开电脑端二维码并扫码"
+    }
+    val nextStep = when {
+        hasCurrentTarget -> "下一步：切换其他电脑，或等待这台重新上线。"
+        pairedDeviceCount > 0 -> "下一步：点“选择电脑”，从已保存设备里选一台。"
+        localDeviceCount > 0 -> "下一步：先扫码配对，之后就能快速切换附近电脑。"
+        else -> "下一步：点击“立即扫码连接”，完成第一次配对。"
+    }
+    val secondaryActionLabel = when {
+        pairedDeviceCount == 0 && localDeviceCount > 0 -> "查看附近电脑"
+        else -> "扫码新电脑"
+    }
+
+    Card(modifier = modifier) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Text(
+                text = when {
+                    hasCurrentTarget -> "这台电脑暂时离线"
+                    pairedDeviceCount > 0 -> "已保存电脑，先选一台"
+                    else -> "还没有连接任何电脑"
+                },
+                style = MaterialTheme.typography.titleMedium
+            )
+            Text(
+                text = primaryActionDescription,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Text(
+                text = nextStep,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Button(
+                    onClick = {
+                        if (pairedDeviceCount == 0) {
+                            onStartPairing()
+                        } else {
+                            onSelectDevice()
+                        }
+                    },
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Icon(
+                        if (pairedDeviceCount == 0) Icons.Default.QrCodeScanner else Icons.Default.Computer,
+                        contentDescription = null
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(primaryActionLabel)
+                }
+                OutlinedButton(
+                    onClick = {
+                        if (pairedDeviceCount == 0 && localDeviceCount > 0) {
+                            onSelectDevice()
+                        } else {
+                            onStartPairing()
+                        }
+                    },
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Icon(
+                        if (pairedDeviceCount == 0 && localDeviceCount > 0) Icons.Default.Wifi else Icons.Default.QrCodeScanner,
+                        contentDescription = null
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(secondaryActionLabel)
+                }
+            }
+
+            if (retryableTextCount > 0) {
+                OutlinedButton(
+                    onClick = onRetryFailed,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Icon(Icons.Default.Refresh, contentDescription = null)
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("重试 $retryableTextCount 条失败文本")
+                }
+            }
+        }
+    }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -780,128 +900,6 @@ fun DeviceSelectionDialog(
             }
         }
     )
-}
-
-@Composable
-private fun StatusActionCard(
-    connectionStatus: InputViewModel.ConnectionStatus,
-    pairedDeviceCount: Int,
-    localDeviceCount: Int,
-    retryableTextCount: Int,
-    onSelectDevice: () -> Unit,
-    onRetryFailed: () -> Unit,
-    onStartPairing: () -> Unit,
-    modifier: Modifier = Modifier
-) {
-    val hasCurrentTarget = connectionStatus.deviceName.isNotBlank()
-    val primaryActionLabel = when {
-        pairedDeviceCount == 0 -> "立即扫码连接"
-        !hasCurrentTarget -> "选择电脑"
-        else -> "切换电脑"
-    }
-    val primaryActionDescription = when {
-        connectionStatus.connected ->
-            "当前电脑：${connectionStatus.deviceName.ifBlank { "已连接" }}"
-        hasCurrentTarget ->
-            "当前目标：${connectionStatus.deviceName}"
-        pairedDeviceCount > 0 ->
-            "已保存 $pairedDeviceCount 台电脑，下一步先选一台"
-        localDeviceCount > 0 ->
-            "发现 $localDeviceCount 台附近电脑，仍需先扫码建立配对"
-        else ->
-            "第一次使用时，请先打开电脑端二维码并扫码"
-    }
-    val nextStep = when {
-        connectionStatus.connected -> "下一步：可直接发送，也可以切换到其他电脑。"
-        hasCurrentTarget -> "下一步：切换其他电脑，或等待这台重新上线。"
-        pairedDeviceCount > 0 -> "下一步：点“选择电脑”，从已保存设备里选一台。"
-        localDeviceCount > 0 -> "下一步：先扫码配对，之后就能快速切换附近电脑。"
-        else -> "下一步：点击“立即扫码连接”，完成第一次配对。"
-    }
-    val secondaryActionLabel = when {
-        pairedDeviceCount == 0 && localDeviceCount > 0 -> "查看附近电脑"
-        else -> "扫码新电脑"
-    }
-
-    Card(modifier = modifier) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
-        ) {
-            Text(
-                text = when {
-                    connectionStatus.connected -> "已连接，可直接发送"
-                    hasCurrentTarget -> "这台电脑暂时离线"
-                    pairedDeviceCount > 0 -> "已保存电脑，先选一台"
-                    else -> "还没有连接任何电脑"
-                },
-                style = MaterialTheme.typography.titleMedium
-            )
-            Text(
-                text = primaryActionDescription,
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-            Text(
-                text = nextStep,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                Button(
-                    onClick = {
-                        if (pairedDeviceCount == 0) {
-                            onStartPairing()
-                        } else {
-                            onSelectDevice()
-                        }
-                    },
-                    modifier = Modifier.weight(1f)
-                ) {
-                    Icon(
-                        if (pairedDeviceCount == 0) Icons.Default.QrCodeScanner else Icons.Default.Computer,
-                        contentDescription = null
-                    )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text(primaryActionLabel)
-                }
-                OutlinedButton(
-                    onClick = {
-                        if (pairedDeviceCount == 0 && localDeviceCount > 0) {
-                            onSelectDevice()
-                        } else {
-                            onStartPairing()
-                        }
-                    },
-                    modifier = Modifier.weight(1f)
-                ) {
-                    Icon(
-                        if (pairedDeviceCount == 0 && localDeviceCount > 0) Icons.Default.Wifi else Icons.Default.QrCodeScanner,
-                        contentDescription = null
-                    )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text(secondaryActionLabel)
-                }
-            }
-
-            if (retryableTextCount > 0) {
-                OutlinedButton(
-                    onClick = onRetryFailed,
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Icon(Icons.Default.Refresh, contentDescription = null)
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text("重试 $retryableTextCount 条失败文本")
-                }
-            }
-        }
-    }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
