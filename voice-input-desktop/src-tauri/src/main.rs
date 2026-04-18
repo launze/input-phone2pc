@@ -9,6 +9,7 @@ mod network;
 mod pairing;
 mod reporting;
 mod storage;
+mod update;
 
 use std::sync::Arc;
 use std::{fs, path::PathBuf};
@@ -265,6 +266,19 @@ async fn generate_openai_report(
     reporting::generate_openai_report(config, &period, start_at, end_at, stream_handle).await
 }
 
+#[tauri::command]
+async fn check_app_update() -> Result<update::UpdateInfo, String> {
+    update::check_update().await.map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn download_and_open_app_update(info: update::UpdateInfo) -> Result<String, String> {
+    update::download_and_open_update(info)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+
 fn save_history_export(filename: &str, csv: &str) -> Result<String, String> {
     let content = format!("\u{feff}{csv}");
     save_export_bytes(filename, content.as_bytes())
@@ -405,6 +419,8 @@ pub fn run() {
             export_openai_report_word,
             save_openai_report_config,
             generate_openai_report,
+            check_app_update,
+            download_and_open_app_update,
             generate_encryption_key,
             set_encryption_key,
             send_encrypted_message,

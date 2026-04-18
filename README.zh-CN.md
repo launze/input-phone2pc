@@ -118,6 +118,60 @@ cargo build --release
 cargo run --release
 ```
 
+## 部署与内置更新服务
+
+现在中转服务除了负责远程消息转发，也会同时提供桌面端和 Android 端的更新服务。
+
+### 端口说明
+- `7070`：WebSocket 中转服务
+- `7071`：更新检查与安装包下载服务
+
+### 推荐部署目录
+
+构建完成后，建议把服务端可执行文件放到独立目录中，并让更新文件与可执行文件放在同级：
+
+```text
+server/
+├── voice-input-server(.exe)
+└── updates/
+    └── stable/
+        ├── manifest.json
+        └── 0.0.1/
+            ├── voiceinput-android-v0.0.1.apk
+            └── voiceinput-desktop-windows-x64-v0.0.1.msi
+```
+
+### 从 GitHub 同步更新包
+
+进入 `voice-input-server/` 目录后，用仓库内置脚本拉取最新 Release 并生成 `manifest.json`：
+
+```bash
+cd voice-input-server
+python sync_updates.py --repo <owner>/<repo>
+```
+
+例如：
+
+```bash
+python sync_updates.py --repo yourname/voiceinput
+```
+
+脚本会自动：
+- 创建或更新 `updates/stable/manifest.json`
+- 把匹配到的安装包下载到 `updates/stable/<version>/`
+- 为每个文件计算 SHA-256 校验值
+
+### 客户端更新行为
+
+桌面端和 Android 端仍然按原方式配置服务地址，例如：
+- 桌面端 / Android 端服务器地址：`wss://your-server:7070`
+
+客户端会自动把这个地址转换为更新服务地址：
+- 中转通信仍走 `7070`
+- 更新检查和下载自动走 `7071`
+
+桌面端在启动后还会静默检查一次更新；如果发现新版本，只会显示顶部提示，不会打断当前操作。
+
 ## 使用方式概览
 
 ### 局域网模式

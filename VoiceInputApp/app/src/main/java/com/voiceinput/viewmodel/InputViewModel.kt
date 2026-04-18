@@ -15,10 +15,12 @@ import com.voiceinput.data.model.NotificationData
 import com.voiceinput.data.model.ServerConfig
 import com.voiceinput.data.model.ServerDeviceInfo
 import com.voiceinput.data.model.SyncStatus
+import com.voiceinput.data.model.AppUpdateState
 import com.voiceinput.data.repository.HistoryRepository
 import com.voiceinput.network.NetworkManager
 import com.voiceinput.network.ServerConnection
 import com.voiceinput.service.NotificationListenerService
+import com.voiceinput.update.AppUpdateManager
 import com.voiceinput.util.ImageTransferCodec
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -49,6 +51,7 @@ class InputViewModel(application: Application) : AndroidViewModel(application) {
     private val historyRepository = HistoryRepository(application.applicationContext)
     private val networkManager = NetworkManager()
     private val serverConnection = ServerConnection(application.applicationContext)
+    private val appUpdateManager = AppUpdateManager(application.applicationContext)
     private val pendingRelayHistoryIds = ArrayDeque<String>()
 
     val serverConnectionState: StateFlow<ServerConnection.ConnectionState> =
@@ -65,6 +68,9 @@ class InputViewModel(application: Application) : AndroidViewModel(application) {
 
     private val _uiMessages = MutableSharedFlow<String>(extraBufferCapacity = 8)
     val uiMessages: SharedFlow<String> = _uiMessages.asSharedFlow()
+
+    private val _appUpdateState = MutableStateFlow<AppUpdateState>(AppUpdateState.Idle)
+    val appUpdateState: StateFlow<AppUpdateState> = _appUpdateState.asStateFlow()
 
     private val _historyItems = MutableStateFlow<List<HistoryItem>>(emptyList())
     val historyItems: StateFlow<List<HistoryItem>> = _historyItems.asStateFlow()
@@ -349,6 +355,38 @@ class InputViewModel(application: Application) : AndroidViewModel(application) {
         val forwarded = serverConnection.sendNotificationForward(targetId, notification)
         if (forwarded) {
             addLog("已转发通知: ${notification.appName}")
+        }
+    }
+
+    fun checkAppUpdate() {
+        viewModelScope.launch {
+            try {
+                _appUpdateState.value = AppUpdateState.Checking
+                val info = appUpdateManager.checkUpdate()
+                _appUpdateState.value = if (info.hasUpdate) {
+                    AppUpdateState.Available(info)
+                } else {
+                    AppUpdateState.UpToDate(info.latestVersion)
+                }
+            } catch (e: Exception) {
+                _appUpdateState.value = AppUpdateState.Error(e.message ?: "检查更新失败")
+            }
+        }
+    }
+
+    fun downloadAndInstallUpdate() {
+        val current = _appUpdateState.value
+        val info = if (current is AppUpdateState.Available) current.info else return
+        viewModelScope.launch {
+            try {
+                val fileName = info.asset?.fileName ?: "update.apk"
+                _appUpdateState.value = AppUpdateState.Downloading(fileName)
+                val file = appUpdateManager.downloadApk(info)
+                _appUpdateState.value = AppUpdateState.ReadyToInstall(file.name)
+                appUpdateManager.installApk(file)
+            } catch (e: Exception) {
+                _appUpdateState.value = AppUpdateState.Error(e.message ?: "下载安装失败")
+            }
         }
     }
 

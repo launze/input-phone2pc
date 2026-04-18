@@ -117,6 +117,60 @@ cargo build --release
 cargo run --release
 ```
 
+## Deployment and Built-in Update Service
+
+The relay server now also hosts a local update service for desktop and Android clients.
+
+### Ports
+- `7070`: WebSocket relay service
+- `7071`: update check and package download service
+
+### Recommended deployment layout
+
+After building the server, place the executable in a dedicated deployment directory. The update metadata and assets should live next to the executable:
+
+```text
+server/
+├── voice-input-server(.exe)
+└── updates/
+    └── stable/
+        ├── manifest.json
+        └── 0.0.1/
+            ├── voiceinput-android-v0.0.1.apk
+            └── voiceinput-desktop-windows-x64-v0.0.1.msi
+```
+
+### Sync release assets from GitHub
+
+Use the helper script in `voice-input-server/` to download the latest GitHub release assets and generate `manifest.json`:
+
+```bash
+cd voice-input-server
+python sync_updates.py --repo <owner>/<repo>
+```
+
+Example:
+
+```bash
+python sync_updates.py --repo yourname/voiceinput
+```
+
+This script will:
+- create or update `updates/stable/manifest.json`
+- download matched release assets into `updates/stable/<version>/`
+- compute SHA-256 checksums for the downloaded files
+
+### Client update behavior
+
+Configure desktop and Android clients with the relay server address as usual, for example:
+- desktop / Android server URL: `wss://your-server:7070`
+
+Clients will automatically convert that address for update requests:
+- relay traffic stays on `7070`
+- update checks and downloads go to `7071`
+
+The desktop client will also perform a silent update check shortly after startup and show a non-blocking banner when a new version is available.
+
 ## Usage Overview
 
 ### Local Network Mode

@@ -1,0 +1,79 @@
+{
+  "channel": "stable",
+  "latest_version": "0.0.1",
+  "minimum_supported_version": "0.0.1",
+  "releases": [
+    {
+      "version": "0.0.1",
+      "release_notes": "## VoiceInput 0.0.1\n\nThis is the first public starting release of VoiceInput.\n\nVoiceInput is a cross-platform project for sending text from an Android phone to a desktop machine and inserting it directly into the current input target.\n\n### Included in this release\n- Android client\n- Desktop client for multiple operating systems\n- Initial public version baseline\n\n### Asset guide\n\n#### Android\n- `voiceinput-android-v0.0.1.apk`  \n  Android installation package.\n\n#### Windows\n- `voiceinput-desktop-windows-x64-v0.0.1.msi`  \n  Standard Windows installer package.\n- `voiceinput-desktop-windows-x64-v0.0.1-setup.exe`  \n  Windows setup executable.\n\n#### macOS\n- `voiceinput-desktop-macos-x64-v0.0.1.dmg`  \n  Desktop package for Intel Macs.\n- `voiceinput-desktop-macos-arm64-v0.0.1.dmg`  \n  Desktop package for Apple Silicon Macs.\n\n#### Linux\n- `voiceinput-desktop-linux-x64-v0.0.1.deb`  \n  Debian/Ubuntu package.\n- `voiceinput-desktop-linux-x64-v0.0.1.AppImage`  \n  Portable Linux package.\n\n### Notes\n- `0.0.1` is the first public starting point of the project.\n- Future releases will evolve from this baseline.",
+      "published_at": "2026-04-18T02:12:07Z",
+      "force_update": false,
+      "assets": [
+        {
+          "platform": "android",
+          "arch": "universal",
+          "file_name": "voiceinput-android-v0.0.1.apk",
+          "sha256": "06b823068d270f66ebfc7ff878d3c47268cfe5e3da0c281ae2f7198e63d9b3fa",
+          "size": 10713331,
+          "mime_type": "application/octet-stream"
+        },
+        {
+          "platform": "linux",
+          "arch": "x64",
+          "file_name": "voiceinput-desktop-linux-x64-v0.0.1.AppImage",
+          "sha256": "8ba48ee486da182f07cb23d514f8b0cc795efb3428012c9c2f51bb2fa037c7b0",
+          "size": 86628856,
+          "mime_type": "application/octet-stream"
+        },
+        {
+          "platform": "linux",
+          "arch": "x64",
+          "file_name": "voiceinput-desktop-linux-x64-v0.0.1.deb",
+          "sha256": "0fe7a76a31d17e903d1d4d4f6b9d7cf3d3d721bf9065b86efab6636828cccca3",
+          "size": 9556928,
+          "mime_type": "application/octet-stream"
+        },
+        {
+          "platform": "macos",
+          "arch": "arm64",
+          "file_name": "voiceinput-desktop-macos-arm64-v0.0.1.dmg",
+          "sha256": "d1b56ca156e30a5bb4933eebb79324e5cfac11a2299c4ed4898b8d220fd74cb8",
+          "size": 9237773,
+          "mime_type": "application/octet-stream"
+        },
+        {
+          "platform": "macos",
+          "arch": "x64",
+          "file_name": "voiceinput-desktop-macos-x64-v0.0.1.dmg",
+          "sha256": "528d139f25209c71182c477da7c912b14f9bf4a55366e3369587b56690d0b066",
+          "size": 9765863,
+          "mime_type": "application/octet-stream"
+        },
+        {
+          "platform": "windows",
+          "arch": "x64",
+          "file_name": "voiceinput-desktop-windows-x64-v0.0.1-setup.exe",
+          "sha256": "52053fc231d41a120f19c83858cc952f90feba378f8357d9d8c2333f20221dcd",
+          "size": 6061331,
+          "mime_type": "application/x-msdownload"
+        },
+        {
+          "platform": "windows",
+          "arch": "x64",
+          "file_name": "voiceinput-desktop-windows-x64-v0.0.1.msi",
+          "sha256": "5a38db96b4e13d0f186112c3bc4ea26d1ff46d93f1ca05c03c140ec016c66b28",
+          "size": 8978432,
+          "mime_type": "application/octet-stream"
+        },
+        {
+          "platform": "linux",
+          "arch": "x64",
+          "file_name": "voiceinput-server-linux-x64-v0.0.1",
+          "sha256": "241f22da0e13e1403ac04cb9f5784a7cab2f7d37d602c67601b6b7d7dd2d1130",
+          "size": 5948360,
+          "mime_type": "application/octet-stream"
+        }
+      ]
+    }
+  ]
+}

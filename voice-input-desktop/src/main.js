@@ -57,6 +57,9 @@ document.addEventListener('DOMContentLoaded', async () => {
     const copyAiReportBtn = document.getElementById('copy-ai-report-btn');
     const copyAiReportInlineBtn = document.getElementById('copy-ai-report-inline-btn');
     const exportAiReportWordBtn = document.getElementById('export-ai-report-word-btn');
+    const checkUpdateBtn = document.getElementById('check-update-btn');
+    const downloadUpdateBtn = document.getElementById('download-update-btn');
+    const updateStatus = document.getElementById('update-status');
 
     let connectedDeviceId = null;
     let pairedDeviceId = null;      // 配对设备 ID
@@ -82,6 +85,69 @@ document.addEventListener('DOMContentLoaded', async () => {
     let aiReportShouldAutoScroll = true;
     let aiReportIgnoreScrollEvent = false;
     const AI_REPORT_SCROLL_THRESHOLD = 24;
+    let currentUpdateInfo = null;
+    let updateBusy = false;
+
+    function setUpdateStatus(message, tone = '') {
+        if (!updateStatus) return;
+        updateStatus.textContent = message || '';
+        updateStatus.className = 'update-panel-status';
+        if (tone) updateStatus.classList.add(tone);
+    }
+
+    function setUpdateBusy(busy) {
+        updateBusy = busy;
+        if (checkUpdateBtn) checkUpdateBtn.disabled = busy;
+        if (downloadUpdateBtn) {
+            downloadUpdateBtn.disabled = busy || !currentUpdateInfo?.has_update || !currentUpdateInfo?.asset;
+        }
+    }
+
+    async function checkForAppUpdate({ silent = false } = {}) {
+        if (updateBusy) return;
+        try {
+            setUpdateBusy(true);
+            setUpdateStatus(silent ? '启动后正在静默检查更新...' : '正在检查更新...');
+            const info = await invoke('check_app_update');
+            currentUpdateInfo = info;
+            if (info?.has_update && info?.asset) {
+                const note = info.release_notes || info.releaseNotes || '';
+                setUpdateStatus(`发现新版本 ${info.latest_version}${note ? ` · ${note.slice(0, 80)}` : ''}`, info.force_update ? 'error' : 'success');
+                if (silent) {
+                    showEventBanner(`发现新版本 ${info.latest_version}，可在高级工具中下载更新`, info.force_update ? 'error' : 'success', 7000);
+                }
+            } else {
+                setUpdateStatus(`当前已是最新版本 ${info?.latest_version || ''}`, 'success');
+            }
+        } catch (error) {
+            console.error('❌ 检查更新失败:', error);
+            const message = typeof error === 'string' ? error : error?.message || '检查更新失败';
+            currentUpdateInfo = null;
+            if (!silent) {
+                setUpdateStatus(message, 'error');
+            } else {
+                setUpdateStatus('启动后静默检查未成功，可稍后手动检查');
+            }
+        } finally {
+            setUpdateBusy(false);
+        }
+    }
+
+    async function downloadAppUpdate() {
+        if (updateBusy || !currentUpdateInfo?.has_update || !currentUpdateInfo?.asset) return;
+        try {
+            setUpdateBusy(true);
+            setUpdateStatus('正在下载安装包...');
+            const savedPath = await invoke('download_and_open_app_update', { info: currentUpdateInfo });
+            setUpdateStatus(savedPath ? `安装包已打开：${savedPath}` : '安装包已下载并打开', 'success');
+        } catch (error) {
+            console.error('❌ 下载更新失败:', error);
+            const message = typeof error === 'string' ? error : error?.message || '下载更新失败';
+            setUpdateStatus(message, 'error');
+        } finally {
+            setUpdateBusy(false);
+        }
+    }
 
     function getUnpairedDetail() {
         if (!serverModeToggle.checked) {
@@ -679,7 +745,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
 
     // ===== 设备连接/上线 =====
-    function onDeviceConnected(name, devId) {
+    function applyDeviceReadyState({ name, devId, bannerMessage = '', bannerTone = '', switchView = true } = {}) {
         isPaired = true;
         isDeviceOnline = true;
         hasConnectedDeviceBefore = true;
@@ -689,7 +755,16 @@ document.addEventListener('DOMContentLoaded', async () => {
             pairedDeviceId = devId;
         }
         renderToolbarStatus();
-        switchToHistoryView();
+        if (switchView) {
+            switchToHistoryView();
+        }
+        if (bannerMessage) {
+            showEventBanner(bannerMessage, bannerTone || '', 4500);
+        }
+    }
+
+    function onDeviceConnected(name, devId) {
+        applyDeviceReadyState({ name, devId });
     }
 
     function onDeviceDisconnected() {
@@ -726,12 +801,23 @@ document.addEventListener('DOMContentLoaded', async () => {
     // 使用 __TAURI_INTERNALS__ 获取 event API（比 window.__TAURI__ 更可靠）
     const tauriEvent = window.__TAURI__?.event || window.__TAURI_INTERNALS__?.event;
     if (tauriEvent && tauriEvent.listen) {
-        tauriEvent.listen('device_connected', (event) => {
-            console.log('📱 设备连接事件:', JSON.stringify(event));
+        tauriEvent.listen('device_ready', (event) => {
+            console.log('📱 设备就绪事件:', JSON.stringify(event));
             const name = event.payload?.device_name || 'Android设备';
             const devId = event.payload?.device_id || null;
-            onDeviceConnected(name, devId);
-            showEventBanner(`设备已连接：${name}`);
+            const via = event.payload?.via || event.payload?.device_type || 'server';
+            const pairedAt = event.payload?.paired_at;
+            const bannerMessage = pairedAt
+                ? `配对成功，已连接：${name}`
+                : `设备已连接：${name}`;
+            const bannerTone = pairedAt ? 'success' : '';
+            applyDeviceReadyState({
+                name,
+                devId,
+                bannerMessage,
+                bannerTone,
+                switchView: true
+            });
         });
 
         tauriEvent.listen('device_disconnected', (event) => {
@@ -745,7 +831,11 @@ document.addEventListener('DOMContentLoaded', async () => {
             const text = event.payload?.text || '';
             const deliveryMode = event.payload?.delivery_mode || 'live';
             if (text && deliveryMode !== 'offline_sync' && !isDeviceOnline) {
-                onDeviceConnected(pairedDeviceName || 'Android设备', connectedDeviceId || pairedDeviceId);
+                applyDeviceReadyState({
+                    name: pairedDeviceName || event.payload?.from_device_name || 'Android设备',
+                    devId: connectedDeviceId || pairedDeviceId || event.payload?.from_device_id || null,
+                    switchView: true
+                });
             }
         });
 
@@ -777,21 +867,6 @@ document.addEventListener('DOMContentLoaded', async () => {
                 return;
             }
             appendAiReportDelta(payload.delta || '');
-        });
-
-        // 监听配对成功事件
-        tauriEvent.listen('device_paired', (event) => {
-            console.log('✅ 配对成功事件:', JSON.stringify(event));
-            const data = event.payload;
-            pairedDeviceId = data.device_id;
-            connectedDeviceId = data.device_id;
-            pairedDeviceName = data.device_name;
-            isPaired = true;
-            isDeviceOnline = false;
-            hasConnectedDeviceBefore = false;
-            renderToolbarStatus();
-            switchToHistoryView();
-            showEventBanner(`配对成功：${data.device_name}`);
         });
 
         // 监听配对失败事件
@@ -847,6 +922,10 @@ document.addEventListener('DOMContentLoaded', async () => {
             switchToPairingView();
         }
         renderToolbarStatus();
+        setUpdateStatus('可手动检查服务器上的最新版本');
+        setTimeout(() => {
+            checkForAppUpdate({ silent: true });
+        }, 1200);
 
         // 3. 连接服务器（事件监听器已就绪，不会丢失 PAIRED_DEVICE_ONLINE）
         if (config.server_mode_enabled) {
@@ -919,6 +998,9 @@ document.addEventListener('DOMContentLoaded', async () => {
         }
         setAiSettingsVisible(!settingsOpen);
     });
+
+    checkUpdateBtn?.addEventListener('click', checkForAppUpdate);
+    downloadUpdateBtn?.addEventListener('click', downloadAppUpdate);
 
     saveOpenAiConfigBtn.addEventListener('click', async () => {
         try {

@@ -102,7 +102,7 @@ async fn handle_client(socket: TcpStream, app_handle: AppHandle) -> Result<(), B
                         "via": "lan"
                     });
                     app_handle
-                        .emit("device_connected", &conn_payload)
+                        .emit("device_ready", &conn_payload)
                         .unwrap_or(());
                     println!("Pair succeeded over LAN: {} ({})", device_name, device_id);
 

@@ -348,8 +348,8 @@ async fn handle_server_messages(
                                 "device_type": "android",
                                 "paired_at": chrono::Utc::now().to_rfc3339()
                             });
-                            handle.emit("device_paired", &payload).unwrap_or(());
-                            println!("✅ [配对成功] 已向前端发送 device_paired 事件");
+                            handle.emit("device_ready", &payload).unwrap_or(());
+                            println!("✅ [配对成功] 已向前端发送 device_ready 事件");
                         }
                     }
                 } else {
@@ -402,7 +402,7 @@ async fn handle_server_messages(
                         "connected_at": chrono::Utc::now().to_rfc3339(),
                         "via": "server"
                     });
-                    handle.emit("device_connected", &payload).unwrap_or(());
+                    handle.emit("device_ready", &payload).unwrap_or(());
                 }
             }
             "PAIRED_DEVICE_OFFLINE" => {

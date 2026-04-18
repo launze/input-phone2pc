@@ -54,6 +54,7 @@ import androidx.core.content.ContextCompat.startActivity
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import com.voiceinput.data.ConfigManager
+import com.voiceinput.data.model.AppUpdateState
 import com.voiceinput.network.ServerConnection
 import com.voiceinput.viewmodel.InputViewModel
 
@@ -75,6 +76,7 @@ fun SettingsScreen(
     val connectionLog by viewModel.connectionLog.collectAsState()
     val pairedDevices by viewModel.pairedDevices.collectAsState()
     val connectionStatus by viewModel.connectionStatus.collectAsState()
+    val appUpdateState by viewModel.appUpdateState.collectAsState()
     var notificationAccessGranted by remember {
         mutableStateOf(isNotificationListenerEnabled(context))
     }
@@ -395,6 +397,55 @@ fun SettingsScreen(
                                     else -> MaterialTheme.colorScheme.onSurfaceVariant
                                 }
                             )
+                        }
+                    }
+                }
+            }
+
+            Card(modifier = Modifier.fillMaxWidth()) {
+                Column(
+                    modifier = Modifier.padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Text("应用更新", style = MaterialTheme.typography.titleMedium)
+                    Text(
+                        text = when (val state = appUpdateState) {
+                            AppUpdateState.Idle -> "可手动检查服务器上的最新版本"
+                            AppUpdateState.Checking -> "正在检查更新..."
+                            is AppUpdateState.Available -> "发现新版本 ${state.info.latestVersion}"
+                            is AppUpdateState.UpToDate -> "当前已是最新版本 ${state.version}"
+                            is AppUpdateState.Downloading -> "正在下载 ${state.fileName}"
+                            is AppUpdateState.ReadyToInstall -> "安装包已准备好：${state.fileName}"
+                            is AppUpdateState.Error -> "更新失败：${state.message}"
+                        },
+                        style = MaterialTheme.typography.bodyMedium
+                    )
+                    if (appUpdateState is AppUpdateState.Available) {
+                        val info = (appUpdateState as AppUpdateState.Available).info
+                        if (info.releaseNotes.isNotBlank()) {
+                            Text(
+                                info.releaseNotes,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Button(
+                            onClick = { viewModel.checkAppUpdate() },
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Text("检查更新")
+                        }
+                        OutlinedButton(
+                            onClick = { viewModel.downloadAndInstallUpdate() },
+                            enabled = appUpdateState is AppUpdateState.Available,
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Text("下载更新")
                         }
                     }
                 }
