@@ -1,6 +1,6 @@
 {
   "name": "voice-input-server",
-  "version": "1.0.0",
+  "version": "0.0.1",
   "description": "语音输入中转服务器",
   "type": "module",
   "scripts": {
