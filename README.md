@@ -2,6 +2,8 @@
 
 > Input on your phone, type on your computer.
 
+[简体中文说明](./README.zh-CN.md)
+
 `VoiceInput` is a cross-platform input project that lets you send text from an Android phone to a desktop machine and insert it directly into the current input target.
 
 It is designed for simple cross-device text input, quick pairing on a local network, and an optional relay server for remote connections.

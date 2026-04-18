@@ -1,5 +1,8 @@
 name: Build All Platforms
 
+permissions:
+  contents: write
+
 on:
   push:
     branches: [ master, main ]
