@@ -80,7 +80,7 @@ async fn handle_client(socket: TcpStream, app_handle: AppHandle) -> Result<(), B
                     let device_name = message
                         .get("device_name")
                         .and_then(|v| v.as_str())
-                        .unwrap_or("Android");
+                        .unwrap_or("Android 设备");
 
                     if device_id.is_empty() {
                         let response = serde_json::json!({
@@ -102,7 +102,7 @@ async fn handle_client(socket: TcpStream, app_handle: AppHandle) -> Result<(), B
                         "via": "lan"
                     });
                     app_handle
-                        .emit("device_ready", &conn_payload)
+                        .emit("device_connected", &conn_payload)
                         .unwrap_or(());
                     println!("Pair succeeded over LAN: {} ({})", device_name, device_id);
 
@@ -189,12 +189,19 @@ async fn handle_input_message(
         .unwrap_or(received_at);
     let (from_device_id, from_device_name) = peer
         .map(|(device_id, device_name)| (device_id.clone(), device_name.clone()))
-        .unwrap_or_else(|| ("unknown".to_string(), "Android".to_string()));
+        .unwrap_or_else(|| ("未知设备".to_string(), "Android 设备".to_string()));
 
     match msg_type {
         "TEXT_INPUT" => {
             if let Some(text) = message.get("text").and_then(|v| v.as_str()) {
+                let press_enter = message
+                    .get("press_enter")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false);
                 input::simulate_text_input(text);
+                if press_enter {
+                    let _ = input::simulate_enter_key();
+                }
 
                 let record = NewHistoryRecord {
                     id: Uuid::new_v4().to_string(),
@@ -206,6 +213,7 @@ async fn handle_input_message(
                     received_at,
                     via: via.to_string(),
                     delivery_mode: "live".to_string(),
+                    metadata: None,
                 };
                 if let Ok((stored, inserted)) = history::record_message(record) {
                     if inserted {
@@ -230,17 +238,29 @@ async fn handle_input_message(
             }
         }
         "IMAGE_INPUT" => {
-            let success = message
-                .get("image_data")
-                .and_then(|v| v.as_str())
-                .and_then(|data| base64::engine::general_purpose::STANDARD.decode(data).ok())
-                .map(|bytes| input::simulate_image_input(&bytes).is_ok())
+            let image_data = message.get("image_data").and_then(|v| v.as_str());
+            let image_bytes = image_data
+                .and_then(|data| base64::engine::general_purpose::STANDARD.decode(data).ok());
+            let success = image_bytes
+                .as_deref()
+                .map(|bytes| input::simulate_image_input(bytes).is_ok())
                 .unwrap_or(false);
 
             let file_name = message
                 .get("file_name")
                 .and_then(|v| v.as_str())
                 .unwrap_or("clipboard-image");
+            let metadata = image_data.map(|data| {
+                serde_json::json!({
+                    "mime_type": message.get("mime_type").and_then(|v| v.as_str()).unwrap_or(""),
+                    "file_name": file_name,
+                    "data": data,
+                    "width": message.get("width").and_then(|v| v.as_i64()),
+                    "height": message.get("height").and_then(|v| v.as_i64()),
+                    "size": message.get("size").and_then(|v| v.as_i64())
+                })
+                .to_string()
+            });
             let record = NewHistoryRecord {
                 id: Uuid::new_v4().to_string(),
                 from_device_id,
@@ -251,6 +271,7 @@ async fn handle_input_message(
                 received_at,
                 via: via.to_string(),
                 delivery_mode: "live".to_string(),
+                metadata,
             };
             if let Ok((stored, inserted)) = history::record_message(record) {
                 if inserted {

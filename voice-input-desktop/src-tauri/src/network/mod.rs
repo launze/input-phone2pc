@@ -95,20 +95,20 @@ async fn handle_server_messages(
                     .unwrap_or(false);
                 if success {
                     let session_id = msg.get("session_id").and_then(|v| v.as_str()).unwrap_or("");
-                    println!("Server register success: {}", session_id);
+                    println!("服务器注册成功: {}", session_id);
                 } else {
                     let message = msg
                         .get("message")
                         .and_then(|v| v.as_str())
-                        .unwrap_or("unknown");
-                    eprintln!("Server register failed: {}", message);
+                        .unwrap_or("未知错误");
+                    eprintln!("服务器注册失败: {}", message);
                 }
             }
             "RELAY_MESSAGE" => {
                 let from_id = msg
                     .get("from_device_id")
                     .and_then(|v| v.as_str())
-                    .unwrap_or("unknown");
+                    .unwrap_or("未知设备");
                 let from_name = msg
                     .get("from_device_name")
                     .and_then(|v| v.as_str())
@@ -132,6 +132,13 @@ async fn handle_server_messages(
                             if let Some(text) = payload.get("text").and_then(|v| v.as_str()) {
                                 if should_inject {
                                     crate::input::simulate_text_input(text);
+                                    if payload
+                                        .get("press_enter")
+                                        .and_then(|v| v.as_bool())
+                                        .unwrap_or(false)
+                                    {
+                                        let _ = crate::input::simulate_enter_key();
+                                    }
                                 }
 
                                 if let Some(ref handle) = app_handle {
@@ -227,57 +234,12 @@ async fn handle_server_messages(
                     handle.emit("relay_stored", &msg).unwrap_or(());
                 }
             }
-            "NOTIFICATION_FORWARD" => {
-                let from_id = msg
-                    .get("from_device_id")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("unknown");
-                let from_name = msg
-                    .get("from_device_name")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or(from_id);
-                let received_at = chrono::Utc::now().timestamp_millis();
-                let message_id = format!("notification-{}", Uuid::new_v4());
-                let notification = msg.get("notification").cloned().unwrap_or_else(|| serde_json::json!({}));
-                let history_payload = serde_json::json!({
-                    "type": "NOTIFICATION_FORWARD",
-                    "app_name": notification.get("app_name").and_then(|v| v.as_str()).unwrap_or("通知"),
-                    "title": notification.get("title").and_then(|v| v.as_str()).unwrap_or(""),
-                    "text": notification.get("text").and_then(|v| v.as_str()).unwrap_or(""),
-                    "timestamp": notification.get("timestamp").and_then(|v| v.as_i64()).unwrap_or(received_at)
-                });
-
-                if let Some(ref handle) = app_handle {
-                    if let Some(record) = build_history_record(
-                        message_id,
-                        from_id,
-                        from_name,
-                        &history_payload,
-                        "server",
-                        "live",
-                        received_at,
-                    ) {
-                        emit_history_record(handle, record);
-                    }
-                    handle
-                        .emit(
-                            "notification_received",
-                            &serde_json::json!({
-                                "from_device_id": from_id,
-                                "from_device_name": from_name,
-                                "notification": notification,
-                                "received_at": received_at
-                            }),
-                        )
-                        .unwrap_or(());
-                }
-            }
             "HEARTBEAT" => {
                 // Ignore server heartbeat response
             }
             "DEVICE_LIST_RESPONSE" => {
                 if let Some(devices) = msg.get("devices").and_then(|v| v.as_array()) {
-                    println!("Online devices from server: {}", devices.len());
+                    println!("服务器返回在线设备数量: {}", devices.len());
                 }
             }
             "SERVER_PAIR_RESPONSE" => {
@@ -292,7 +254,7 @@ async fn handle_server_messages(
                 let from_name = msg
                     .get("from_device_name")
                     .and_then(|v| v.as_str())
-                    .unwrap_or("Unknown");
+                    .unwrap_or("未知设备");
                 let to_id = msg
                     .get("to_device_id")
                     .and_then(|v| v.as_str())
@@ -300,7 +262,7 @@ async fn handle_server_messages(
                 let to_name = msg
                     .get("to_device_name")
                     .and_then(|v| v.as_str())
-                    .unwrap_or("Unknown");
+                    .unwrap_or("未知设备");
 
                 println!(
                     "📨 [收到] SERVER_PAIR_RESPONSE: success={}, from={}({}) -> to={}({})",
@@ -348,15 +310,15 @@ async fn handle_server_messages(
                                 "device_type": "android",
                                 "paired_at": chrono::Utc::now().to_rfc3339()
                             });
-                            handle.emit("device_ready", &payload).unwrap_or(());
-                            println!("✅ [配对成功] 已向前端发送 device_ready 事件");
+                            handle.emit("device_paired", &payload).unwrap_or(());
+                            println!("✅ [配对成功] 已向前端发送 device_paired 事件");
                         }
                     }
                 } else {
                     let message = msg
                         .get("message")
                         .and_then(|v| v.as_str())
-                        .unwrap_or("unknown");
+                        .unwrap_or("未知错误");
                     eprintln!("❌ [配对失败] {}", message);
                     eprintln!(
                         "   配对详情：from={}({}) -> to={}({})",
@@ -389,7 +351,7 @@ async fn handle_server_messages(
                     .and_then(|v| v.as_str())
                     .unwrap_or("?");
 
-                // Persist from authoritative server push.
+                // 以服务器推送为准，持久化配对设备信息。
                 let mut config = crate::storage::config::AppConfig::load();
                 config.add_paired_device(paired_id.to_string(), paired_name.to_string());
                 let _ = config.save();
@@ -402,7 +364,7 @@ async fn handle_server_messages(
                         "connected_at": chrono::Utc::now().to_rfc3339(),
                         "via": "server"
                     });
-                    handle.emit("device_ready", &payload).unwrap_or(());
+                    handle.emit("device_connected", &payload).unwrap_or(());
                 }
             }
             "PAIRED_DEVICE_OFFLINE" => {
@@ -453,15 +415,15 @@ async fn handle_server_messages(
             "ERROR" => {
                 let code = msg.get("code").and_then(|v| v.as_str()).unwrap_or("?");
                 let message = msg.get("message").and_then(|v| v.as_str()).unwrap_or("?");
-                eprintln!("Server error [{}] {}", code, message);
+                eprintln!("服务器错误 [{}] {}", code, message);
             }
             _ => {
-                // Ignore unknown message types.
+                // 忽略未知消息类型。
             }
         }
     }
 
-    println!("Server message loop ended");
+    println!("服务器消息循环已结束");
 }
 
 async fn server_heartbeat() {
@@ -517,12 +479,24 @@ fn build_history_record(
                 received_at,
                 via: via.to_string(),
                 delivery_mode: delivery_mode.to_string(),
+                metadata: None,
             }),
         "CLIPBOARD_IMAGE" => {
             let file_name = payload
                 .get("file_name")
                 .and_then(|v| v.as_str())
                 .unwrap_or("clipboard-image");
+            let metadata = payload.get("data").and_then(|v| v.as_str()).map(|data| {
+                serde_json::json!({
+                    "mime_type": payload.get("mime_type").and_then(|v| v.as_str()).unwrap_or(""),
+                    "file_name": file_name,
+                    "data": data,
+                    "width": payload.get("width").and_then(|v| v.as_i64()),
+                    "height": payload.get("height").and_then(|v| v.as_i64()),
+                    "size": payload.get("size").and_then(|v| v.as_i64())
+                })
+                .to_string()
+            });
             Some(NewHistoryRecord {
                 id,
                 from_device_id: from_device_id.to_string(),
@@ -533,37 +507,7 @@ fn build_history_record(
                 received_at,
                 via: via.to_string(),
                 delivery_mode: delivery_mode.to_string(),
-            })
-        }
-        "NOTIFICATION_FORWARD" => {
-            let app_name = payload
-                .get("app_name")
-                .and_then(|v| v.as_str())
-                .unwrap_or("通知");
-            let title = payload
-                .get("title")
-                .and_then(|v| v.as_str())
-                .unwrap_or("");
-            let text = payload
-                .get("text")
-                .and_then(|v| v.as_str())
-                .unwrap_or("");
-            let summary = [app_name, title, text]
-                .into_iter()
-                .filter(|value| !value.is_empty())
-                .collect::<Vec<_>>()
-                .join(" | ");
-
-            Some(NewHistoryRecord {
-                id,
-                from_device_id: from_device_id.to_string(),
-                from_device_name: from_device_name.to_string(),
-                content_type: "notification".to_string(),
-                content: format!("[通知] {}", summary),
-                sent_at,
-                received_at,
-                via: via.to_string(),
-                delivery_mode: delivery_mode.to_string(),
+                metadata,
             })
         }
         _ => None,

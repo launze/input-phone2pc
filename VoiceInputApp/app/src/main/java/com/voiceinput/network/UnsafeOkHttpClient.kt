@@ -20,8 +20,9 @@ object UnsafeOkHttpClient {
     private fun baseBuilder(): OkHttpClient.Builder {
         return OkHttpClient.Builder()
             .connectTimeout(10, TimeUnit.SECONDS)
-            .readTimeout(30, TimeUnit.SECONDS)
+            .readTimeout(0, TimeUnit.SECONDS)
             .writeTimeout(30, TimeUnit.SECONDS)
+            .pingInterval(20, TimeUnit.SECONDS)
     }
 
     /**

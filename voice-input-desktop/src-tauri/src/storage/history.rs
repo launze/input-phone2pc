@@ -17,6 +17,8 @@ pub struct HistoryRecord {
     pub received_at: i64,
     pub via: String,
     pub delivery_mode: String,
+    #[serde(skip_serializing, default)]
+    pub metadata: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -30,6 +32,7 @@ pub struct NewHistoryRecord {
     pub received_at: i64,
     pub via: String,
     pub delivery_mode: String,
+    pub metadata: Option<String>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -64,8 +67,9 @@ pub fn record_message(record: NewHistoryRecord) -> Result<(HistoryRecord, bool)>
             sent_at,
             received_at,
             via,
-            delivery_mode
-         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+            delivery_mode,
+            metadata
+         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
         params![
             record.id,
             record.from_device_id,
@@ -75,7 +79,8 @@ pub fn record_message(record: NewHistoryRecord) -> Result<(HistoryRecord, bool)>
             record.sent_at,
             record.received_at,
             record.via,
-            record.delivery_mode
+            record.delivery_mode,
+            record.metadata
         ],
     )?;
 
@@ -116,6 +121,36 @@ pub fn list_record_page(query: HistoryQuery) -> Result<HistoryPage> {
 pub fn clear_records() -> Result<()> {
     let conn = open_connection()?;
     conn.execute("DELETE FROM message_history", [])?;
+    Ok(())
+}
+
+pub fn update_record_content(id: &str, content: &str) -> Result<HistoryRecord> {
+    let normalized = content.trim();
+    if normalized.is_empty() {
+        return Err(anyhow!("content cannot be empty"));
+    }
+
+    let conn = open_connection()?;
+    let updated = conn.execute(
+        "UPDATE message_history
+         SET content = ?2
+         WHERE id = ?1",
+        params![id, normalized],
+    )?;
+
+    if updated == 0 {
+        return Err(anyhow!("history record not found"));
+    }
+
+    get_record_by_id(&conn, id)?.ok_or_else(|| anyhow!("history record missing after update"))
+}
+
+pub fn delete_record(id: &str) -> Result<()> {
+    let conn = open_connection()?;
+    let deleted = conn.execute("DELETE FROM message_history WHERE id = ?1", [id])?;
+    if deleted == 0 {
+        return Err(anyhow!("history record not found"));
+    }
     Ok(())
 }
 
@@ -161,7 +196,8 @@ fn get_record_by_id(conn: &Connection, id: &str) -> Result<Option<HistoryRecord>
             sent_at,
             received_at,
             via,
-            delivery_mode
+            delivery_mode,
+            metadata
          FROM message_history
          WHERE id = ?1",
     )?;
@@ -185,7 +221,13 @@ fn map_record_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<HistoryRecord> {
         received_at: row.get(6)?,
         via: row.get(7)?,
         delivery_mode: row.get(8)?,
+        metadata: row.get(9)?,
     })
+}
+
+pub fn get_record(id: &str) -> Result<Option<HistoryRecord>> {
+    let conn = open_connection()?;
+    get_record_by_id(&conn, id)
 }
 
 fn open_connection() -> Result<Connection> {
@@ -205,14 +247,30 @@ fn open_connection() -> Result<Connection> {
             sent_at INTEGER NOT NULL,
             received_at INTEGER NOT NULL,
             via TEXT NOT NULL,
-            delivery_mode TEXT NOT NULL
+            delivery_mode TEXT NOT NULL,
+            metadata TEXT
         );
 
         CREATE INDEX IF NOT EXISTS idx_message_history_received_at
             ON message_history (received_at DESC);",
     )?;
+    ensure_metadata_column(&conn)?;
 
     Ok(conn)
+}
+
+fn ensure_metadata_column(conn: &Connection) -> Result<()> {
+    let mut stmt = conn.prepare("PRAGMA table_info(message_history)")?;
+    let columns = stmt.query_map([], |row| row.get::<_, String>(1))?;
+
+    for column in columns {
+        if column? == "metadata" {
+            return Ok(());
+        }
+    }
+
+    conn.execute("ALTER TABLE message_history ADD COLUMN metadata TEXT", [])?;
+    Ok(())
 }
 
 fn get_history_db_path() -> PathBuf {
@@ -246,7 +304,8 @@ fn build_list_query(query: &HistoryQuery) -> (String, Vec<SqlValue>) {
             sent_at,
             received_at,
             via,
-            delivery_mode
+            delivery_mode,
+            metadata
          FROM message_history
          WHERE 1 = 1",
     );

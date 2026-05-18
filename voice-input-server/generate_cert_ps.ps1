@@ -1,6 +1,6 @@
 # 使用 PowerShell 生成自签名证书
 param(
-    [string]$Hostname = "nas.smarthome2020.top",
+    [string]$Hostname = "ha.wwszxc.tax",
     [string]$OutputDir = "."
 )
 

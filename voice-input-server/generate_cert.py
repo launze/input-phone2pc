@@ -11,7 +11,7 @@ import datetime
 import os
 import ipaddress
 
-def generate_self_signed_cert(hostname="nas.smarthome2020.top", output_dir="."):
+def generate_self_signed_cert(hostname="ha.wwszxc.tax", output_dir="."):
     """生成自签名证书"""
     
     # 生成私钥

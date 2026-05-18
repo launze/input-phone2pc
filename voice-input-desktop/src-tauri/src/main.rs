@@ -6,16 +6,15 @@
 mod crypto;
 mod input;
 mod network;
-mod pairing;
 mod reporting;
 mod storage;
-mod update;
 
 use std::sync::Arc;
 use std::{fs, path::PathBuf};
 use storage::config::{AppConfig, OpenAiReportConfig};
-use storage::history::{self, HistoryPage, HistoryQuery, HistoryRecord};
+use storage::history::{self, HistoryPage, HistoryQuery, HistoryRecord, NewHistoryRecord};
 use tokio::sync::Mutex;
+use uuid::Uuid;
 
 // 全局服务器连接状态
 struct ServerState {
@@ -184,6 +183,74 @@ fn clear_message_history() -> Result<(), String> {
 }
 
 #[tauri::command]
+fn create_desktop_text_record(content: String) -> Result<HistoryRecord, String> {
+    let normalized = content.trim();
+    if normalized.is_empty() {
+        return Err("文字内容不能为空".to_string());
+    }
+
+    let config = AppConfig::load();
+    let now = chrono::Utc::now().timestamp_millis();
+    let record = NewHistoryRecord {
+        id: Uuid::new_v4().to_string(),
+        from_device_id: config.device_id,
+        from_device_name: config.device_name,
+        content_type: "text".to_string(),
+        content: normalized.to_string(),
+        sent_at: now,
+        received_at: now,
+        via: "desktop".to_string(),
+        delivery_mode: "manual".to_string(),
+        metadata: None,
+    };
+
+    history::record_message(record)
+        .map(|(stored, _)| stored)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn update_message_history_record(id: String, content: String) -> Result<HistoryRecord, String> {
+    history::update_record_content(&id, &content).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn delete_message_history_record(id: String) -> Result<(), String> {
+    history::delete_record(&id).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn copy_message_history_image_record(id: String) -> Result<(), String> {
+    use base64::Engine;
+
+    let record = history::get_record(&id)
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| "记录不存在".to_string())?;
+
+    if record.content_type != "image" {
+        return Err("这条记录不是图片记录".to_string());
+    }
+
+    let metadata = record
+        .metadata
+        .as_deref()
+        .ok_or_else(|| "这条图片记录没有保存图片内容，无法复制图片".to_string())?;
+    let metadata: serde_json::Value =
+        serde_json::from_str(metadata).map_err(|_| "图片记录数据已损坏".to_string())?;
+    let image_data = metadata
+        .get("data")
+        .or_else(|| metadata.get("image_data"))
+        .and_then(|value| value.as_str())
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| "这条图片记录没有保存图片内容，无法复制图片".to_string())?;
+    let image_bytes = base64::engine::general_purpose::STANDARD
+        .decode(image_data)
+        .map_err(|_| "图片数据解码失败".to_string())?;
+
+    input::copy_image_to_clipboard(&image_bytes).map_err(|e| format!("复制图片失败: {}", e))
+}
+
+#[tauri::command]
 fn export_message_history(
     start_at: Option<i64>,
     end_at: Option<i64>,
@@ -216,6 +283,17 @@ fn export_message_history(
 }
 
 #[tauri::command]
+fn insert_text_to_cursor(content: String) -> Result<(), String> {
+    let normalized = content.trim();
+    if normalized.is_empty() {
+        return Err("文字内容不能为空".to_string());
+    }
+
+    input::simulate_text_input(normalized);
+    Ok(())
+}
+
+#[tauri::command]
 fn export_openai_report_word(
     period: String,
     title: String,
@@ -227,6 +305,9 @@ fn export_openai_report_word(
     let suffix = match period.as_str() {
         "week" => "week-report",
         "month" => "month-report",
+        "quarter" => "quarter-report",
+        "half_year" => "half-year-report",
+        "year" => "year-report",
         _ => "report",
     };
     let filename = format!(
@@ -243,7 +324,9 @@ fn export_openai_report_word(
 }
 
 #[tauri::command]
-fn save_openai_report_config(openai: OpenAiReportConfig) -> Result<OpenAiConfigSavePayload, String> {
+fn save_openai_report_config(
+    openai: OpenAiReportConfig,
+) -> Result<OpenAiConfigSavePayload, String> {
     let mut config = AppConfig::load();
     config.set_openai_config(openai);
     config.save().map_err(|e| e.to_string())?;
@@ -265,19 +348,6 @@ async fn generate_openai_report(
     });
     reporting::generate_openai_report(config, &period, start_at, end_at, stream_handle).await
 }
-
-#[tauri::command]
-async fn check_app_update() -> Result<update::UpdateInfo, String> {
-    update::check_update().await.map_err(|e| e.to_string())
-}
-
-#[tauri::command]
-async fn download_and_open_app_update(info: update::UpdateInfo) -> Result<String, String> {
-    update::download_and_open_update(info)
-        .await
-        .map_err(|e| e.to_string())
-}
-
 
 fn save_history_export(filename: &str, csv: &str) -> Result<String, String> {
     let content = format!("\u{feff}{csv}");
@@ -358,7 +428,18 @@ async fn unpair_device(device_id: String) -> Result<(), String> {
 
 #[tauri::command]
 fn generate_pairing_qr() -> Result<String, String> {
-    let qr_json = build_pairing_payload()?;
+    let config = AppConfig::load();
+
+    let local_ip = network::discovery::get_local_ip().unwrap_or_default();
+    let qr_data = serde_json::json!({
+        "type": "VOICEINPUT_PAIR",
+        "server_url": config.server_url,
+        "device_id": config.device_id,
+        "device_name": config.device_name,
+        "local_ip": local_ip,
+        "local_port": 58889
+    });
+    let qr_json = serde_json::to_string(&qr_data).map_err(|e| e.to_string())?;
 
     // Generate QR code
     use image::Luma;
@@ -383,25 +464,6 @@ fn generate_pairing_qr() -> Result<String, String> {
     Ok(format!("data:image/png;base64,{}", b64))
 }
 
-#[tauri::command]
-fn get_pairing_payload() -> Result<String, String> {
-    build_pairing_payload()
-}
-
-fn build_pairing_payload() -> Result<String, String> {
-    let config = AppConfig::load();
-    let local_ip = network::discovery::get_local_ip().unwrap_or_default();
-    let qr_data = serde_json::json!({
-        "type": "VOICEINPUT_PAIR",
-        "server_url": config.server_url,
-        "device_id": config.device_id,
-        "device_name": config.device_name,
-        "local_ip": local_ip,
-        "local_port": 58889
-    });
-    serde_json::to_string(&qr_data).map_err(|e| e.to_string())
-}
-
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -415,17 +477,19 @@ pub fn run() {
             get_message_history,
             get_message_history_page,
             clear_message_history,
+            create_desktop_text_record,
+            update_message_history_record,
+            delete_message_history_record,
+            copy_message_history_image_record,
             export_message_history,
+            insert_text_to_cursor,
             export_openai_report_word,
             save_openai_report_config,
             generate_openai_report,
-            check_app_update,
-            download_and_open_app_update,
             generate_encryption_key,
             set_encryption_key,
             send_encrypted_message,
             generate_pairing_qr,
-            get_pairing_payload,
             unpair_device
         ])
         .setup(|app| {
@@ -445,7 +509,7 @@ pub fn run() {
             Ok(())
         })
         .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .expect("运行 Tauri 应用时出错");
 }
 
 fn main() {

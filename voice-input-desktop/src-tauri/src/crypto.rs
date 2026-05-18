@@ -30,6 +30,7 @@ impl EncryptionKey {
     }
 }
 
+#[cfg_attr(not(test), allow(dead_code))]
 pub fn encrypt(data: &[u8], key: &EncryptionKey) -> Result<(String, String), anyhow::Error> {
     let cipher = Aes256Gcm::new_from_slice(&key.0)
         .map_err(|e| anyhow::anyhow!("Failed to create cipher: {:?}", e))?;
@@ -63,6 +64,7 @@ pub fn decrypt(
     Ok(plaintext)
 }
 
+#[cfg_attr(not(test), allow(dead_code))]
 pub fn encrypt_string(text: &str, key: &EncryptionKey) -> Result<(String, String), anyhow::Error> {
     let data = text.as_bytes();
     encrypt(data, key)

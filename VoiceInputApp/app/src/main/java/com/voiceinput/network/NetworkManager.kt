@@ -232,10 +232,11 @@ class NetworkManager {
         }
     }
 
-    suspend fun sendText(text: String): Boolean {
+    suspend fun sendText(text: String, pressEnter: Boolean = false): Boolean {
         val message = Message.TextInput(
             text = text,
-            timestamp = System.currentTimeMillis()
+            timestamp = System.currentTimeMillis(),
+            pressEnter = pressEnter
         )
         return sendPayload(message)
     }

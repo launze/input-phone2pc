@@ -12,7 +12,7 @@ import os
 import ipaddress
 import sys
 
-def generate_self_signed_cert(hostname="nas.smarthome2020.top", output_dir="."):
+def generate_self_signed_cert(hostname="ha.wwszxc.tax", output_dir="."):
     """生成自签名证书"""
     
     print(f"正在生成自签名证书，主机名: {hostname}")
@@ -113,7 +113,7 @@ if __name__ == "__main__":
     if len(sys.argv) > 1:
         hostname = sys.argv[1]
     else:
-        hostname = "nas.smarthome2020.top"
+        hostname = "ha.wwszxc.tax"
     
     print("="*50)
     print("自签名证书生成工具")

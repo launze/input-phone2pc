@@ -42,7 +42,8 @@ sealed class Message {
 
     data class TextInput(
         val text: String,
-        val timestamp: Long
+        val timestamp: Long,
+        @SerializedName("press_enter") val pressEnter: Boolean = false
     ) : Message() {
         @SerializedName("type")
         val type = "TEXT_INPUT"

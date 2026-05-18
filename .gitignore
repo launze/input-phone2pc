@@ -71,6 +71,7 @@ config.json
 *.tmp
 *.temp
 *.bak
+.runtime/
 
 # AI config files
 CLAUDE.md

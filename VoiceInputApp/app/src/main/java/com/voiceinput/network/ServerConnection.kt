@@ -4,7 +4,7 @@ import android.content.Context
 import android.util.Log
 import com.google.gson.Gson
 import com.google.gson.JsonObject
-import com.voiceinput.data.model.NotificationData
+import com.voiceinput.R
 import com.voiceinput.data.model.ServerDeviceInfo
 import com.voiceinput.data.model.ServerMsg
 import com.voiceinput.data.model.ServerConfig
@@ -79,15 +79,16 @@ class ServerConnection(private val context: Context) {
     private fun createDefaultClient(): OkHttpClient {
         return OkHttpClient.Builder()
             .connectTimeout(10, TimeUnit.SECONDS)
-            .readTimeout(30, TimeUnit.SECONDS)
+            .readTimeout(0, TimeUnit.SECONDS)
             .writeTimeout(30, TimeUnit.SECONDS)
+            .pingInterval(20, TimeUnit.SECONDS)
             .build()
     }
 
     private fun createClient(serverUrl: String): OkHttpClient {
         if (!serverUrl.startsWith("wss://", ignoreCase = true)) return createDefaultClient()
-        Log.d(TAG, "WSS URL, using trust-all client for: $serverUrl")
-        return UnsafeOkHttpClient.getUnsafeClient(context)
+        Log.d(TAG, "WSS URL, using bundled certificate for: $serverUrl")
+        return UnsafeOkHttpClient.getClientWithCustomCert(context, R.raw.server_cert)
     }
 
     fun connect(config: ServerConfig, deviceId: String, deviceName: String, listener: WebSocketListener? = null) {
@@ -285,28 +286,6 @@ class ServerConnection(private val context: Context) {
             addProperty("from_device_id", registeredDeviceId ?: "")
             addProperty("to_device_id", toDeviceId)
             add("payload", payload)
-        }
-        return sendRaw(json.toString())
-    }
-
-    fun sendNotificationForward(toDeviceId: String, notification: NotificationData): Boolean {
-        val json = JsonObject().apply {
-            addProperty("type", "NOTIFICATION_FORWARD")
-            addProperty("from_device_id", registeredDeviceId ?: "")
-            addProperty("to_device_id", toDeviceId)
-            add(
-                "notification",
-                JsonObject().apply {
-                    addProperty("app_name", notification.appName)
-                    addProperty("app_package", notification.appPackage)
-                    addProperty("title", notification.title)
-                    addProperty("text", notification.text)
-                    addProperty("timestamp", notification.timestamp)
-                    if (notification.icon != null) {
-                        addProperty("icon", notification.icon)
-                    }
-                }
-            )
         }
         return sendRaw(json.toString())
     }

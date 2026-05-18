@@ -87,7 +87,14 @@ pub async fn generate_openai_report(
 
     let total_record_count = records.len();
     let (records_context, used_record_count) = build_records_context(&records);
-    let prompt = build_prompt(period, start_at, end_at, total_record_count, &records_context, &openai)?;
+    let prompt = build_prompt(
+        period,
+        start_at,
+        end_at,
+        total_record_count,
+        &records_context,
+        &openai,
+    )?;
     let api_target = resolve_api_target(&openai.api_url);
 
     let client = reqwest::Client::builder()
@@ -99,17 +106,22 @@ pub async fn generate_openai_report(
         .post(&api_target.endpoint)
         .header(ACCEPT, "application/json, text/event-stream")
         .bearer_auth(openai.api_key.trim())
-        .json(&build_api_payload(&api_target.protocol, &openai.model_name, &prompt))
+        .json(&build_api_payload(
+            &api_target.protocol,
+            &openai.model_name,
+            &prompt,
+        ))
         .send()
         .await
-        .map_err(|e| format!("请求 OpenAI API 失败: {e}"))?;
+        .map_err(|e| format!("请求 AI API 失败: {e}"))?;
 
     let status = response.status();
-    let parsed_body = read_api_response_body(response, &api_target.protocol, stream_handle.as_ref()).await?;
+    let parsed_body =
+        read_api_response_body(response, &api_target.protocol, stream_handle.as_ref()).await?;
 
     if !status.is_success() {
         return Err(format!(
-            "OpenAI API 返回错误 ({}): {}",
+            "AI API 返回错误 ({}): {}",
             status.as_u16(),
             extract_error_message_from_body(&parsed_body)
         ));
@@ -119,10 +131,9 @@ pub async fn generate_openai_report(
         .content
         .clone()
         .or_else(|| {
-            parsed_body
-                .json
-                .as_ref()
-                .and_then(|response_json| extract_response_text(response_json, &api_target.protocol))
+            parsed_body.json.as_ref().and_then(|response_json| {
+                extract_response_text(response_json, &api_target.protocol)
+            })
         })
         .ok_or_else(|| build_unparseable_response_error(&api_target, &parsed_body))?;
 
@@ -173,7 +184,10 @@ pub fn export_report_to_word(
                 .line_spacing(exact_line_spacing())
                 .add_run(
                     Run::new()
-                        .add_text(format!("{title}{suffix}", suffix = report_period_suffix(period)))
+                        .add_text(format!(
+                            "{title}{suffix}",
+                            suffix = report_period_suffix(period)
+                        ))
                         .fonts(title_fonts())
                         .size(TITLE_SIZE),
                 ),
@@ -228,16 +242,11 @@ pub fn export_report_to_word(
 
 fn validate_openai_config(config: &OpenAiReportConfig) -> Result<(), String> {
     if config.api_key.trim().is_empty() {
-        return Err("请先填写 OpenAI API Key".to_string());
+        return Err("请先填写 AI API Key".to_string());
     }
     if config.model_name.trim().is_empty() {
         return Err("请先填写模型名称".to_string());
     }
-    if config.weekly_prompt_template.trim().is_empty()
-        || config.monthly_prompt_template.trim().is_empty()
-    {
-        return Err("周报和月报模板不能为空".to_string());
-    };
     Ok(())
 }
 
@@ -252,8 +261,15 @@ fn build_prompt(
     let (period_label, template) = match period {
         "week" => ("周报", openai.weekly_prompt_template.as_str()),
         "month" => ("月报", openai.monthly_prompt_template.as_str()),
+        "quarter" => ("季报", openai.quarterly_prompt_template.as_str()),
+        "half_year" => ("半年报", openai.half_year_prompt_template.as_str()),
+        "year" => ("年报", openai.yearly_prompt_template.as_str()),
         _ => return Err("暂不支持该报告类型".to_string()),
     };
+
+    if template.trim().is_empty() {
+        return Err(format!("{period_label}模板不能为空"));
+    }
 
     let replacements = [
         ("{{period_label}}", period_label),
@@ -288,14 +304,17 @@ fn build_records_context(records: &[HistoryRecord]) -> (String, usize) {
             sent_at = format_timestamp(record.sent_at),
             received_at = format_timestamp(record.received_at),
             from_device = sanitize_inline_text(&record.from_device_name, &record.from_device_id),
-            via = sanitize_inline_text(&record.via, "unknown"),
+            via = sanitize_inline_text(&record.via, "未知通道"),
             mode = sanitize_inline_text(&record.delivery_mode, "live"),
             content = sanitize_multiline_text(&record.content),
         );
 
         if total_len + line.len() > MAX_REPORT_CONTEXT_CHARS {
             let omitted = records.len().saturating_sub(used_count);
-            lines.push(format!("... 已省略 {} 条较早记录，避免上下文过长。", omitted));
+            lines.push(format!(
+                "... 已省略 {} 条较早记录，避免上下文过长。",
+                omitted
+            ));
             break;
         }
 
@@ -327,7 +346,7 @@ fn resolve_api_target(api_url: &str) -> ApiTarget {
             protocol: ApiProtocol::Responses,
         };
     }
-    if trimmed.contains("/compatible-mode/") || trimmed.contains("dashscope") {
+    if is_chat_completions_provider_url(trimmed) {
         return ApiTarget {
             endpoint: format!("{trimmed}/chat/completions"),
             protocol: ApiProtocol::ChatCompletions,
@@ -351,6 +370,13 @@ fn resolve_api_target(api_url: &str) -> ApiTarget {
     }
 }
 
+fn is_chat_completions_provider_url(api_url: &str) -> bool {
+    let lower = api_url.to_ascii_lowercase();
+    lower.contains("/compatible-mode/")
+        || lower.contains("dashscope")
+        || lower.contains("api.deepseek.com")
+}
+
 fn extract_response_text(response_json: &Value, protocol: &ApiProtocol) -> Option<String> {
     match protocol {
         ApiProtocol::Responses => extract_responses_text(response_json)
@@ -366,6 +392,18 @@ fn extract_error_message(response_json: &Value) -> String {
         .and_then(|value| value.get("message"))
         .and_then(Value::as_str)
         .map(|value| value.to_string())
+        .or_else(|| {
+            response_json
+                .get("message")
+                .and_then(Value::as_str)
+                .map(ToString::to_string)
+        })
+        .or_else(|| {
+            response_json
+                .get("detail")
+                .and_then(Value::as_str)
+                .map(ToString::to_string)
+        })
         .or_else(|| {
             let raw = response_json.to_string();
             let trimmed = raw.trim();
@@ -399,7 +437,7 @@ fn extract_error_message_from_body(parsed_body: &ParsedApiBody) -> String {
 
 fn build_unparseable_response_error(api_target: &ApiTarget, parsed_body: &ParsedApiBody) -> String {
     let mut message = format!(
-        "OpenAI API 未返回可解析的报告内容。当前请求地址: {}",
+        "AI API 未返回可解析的报告内容。当前请求地址: {}",
         api_target.endpoint
     );
 
@@ -407,7 +445,7 @@ fn build_unparseable_response_error(api_target: &ApiTarget, parsed_body: &Parsed
         || api_target.endpoint.contains("/compatible-mode/")
     {
         message.push_str(
-            "。如使用阿里云百炼兼容模式，Base URL 可填写 https://dashscope.aliyuncs.com/compatible-mode/v1，程序会自动请求 /chat/completions",
+            "。如使用 DeepSeek，Base URL 可填写 https://api.deepseek.com 或 https://api.deepseek.com/v1；如使用阿里云百炼兼容模式，Base URL 可填写 https://dashscope.aliyuncs.com/compatible-mode/v1。程序会自动请求 /chat/completions",
         );
     } else {
         message.push_str(&format!(
@@ -495,6 +533,25 @@ fn should_skip_export_metadata_line(period: &str, line: &str) -> bool {
     match period {
         "week" => normalized.starts_with("周报") || normalized.starts_with("工作周报"),
         "month" => normalized.starts_with("月报") || normalized.starts_with("工作月报"),
+        "quarter" => {
+            normalized.starts_with("季报")
+                || normalized.starts_with("季度报")
+                || normalized.starts_with("季度报表")
+                || normalized.starts_with("工作季报")
+                || normalized.starts_with("工作季度报")
+        }
+        "half_year" => {
+            normalized.starts_with("半年报")
+                || normalized.starts_with("半年度报")
+                || normalized.starts_with("半年度报告")
+                || normalized.starts_with("工作半年报")
+        }
+        "year" => {
+            normalized.starts_with("年报")
+                || normalized.starts_with("年度报")
+                || normalized.starts_with("年度报告")
+                || normalized.starts_with("工作年报")
+        }
         _ => false,
     }
 }
@@ -569,7 +626,10 @@ fn parse_report_line(line: &str) -> ParsedReportLine {
     let heading_prefixes = [
         "一、", "二、", "三、", "四、", "五、", "六、", "七、", "八、", "九、", "十、",
     ];
-    if heading_prefixes.iter().any(|prefix| trimmed.starts_with(prefix)) {
+    if heading_prefixes
+        .iter()
+        .any(|prefix| trimmed.starts_with(prefix))
+    {
         return ParsedReportLine {
             style: ReportLineStyle::Heading,
             marker: None,
@@ -578,10 +638,27 @@ fn parse_report_line(line: &str) -> ParsedReportLine {
     }
 
     let subheading_prefixes = [
-        "（一）", "（二）", "（三）", "（四）", "（五）", "（六）", "（七）", "（八）",
-        "(一)", "(二)", "(三)", "(四)", "(五)", "(六)", "(七)", "(八)",
+        "（一）",
+        "（二）",
+        "（三）",
+        "（四）",
+        "（五）",
+        "（六）",
+        "（七）",
+        "（八）",
+        "(一)",
+        "(二)",
+        "(三)",
+        "(四)",
+        "(五)",
+        "(六)",
+        "(七)",
+        "(八)",
     ];
-    if subheading_prefixes.iter().any(|prefix| trimmed.starts_with(prefix)) {
+    if subheading_prefixes
+        .iter()
+        .any(|prefix| trimmed.starts_with(prefix))
+    {
         return ParsedReportLine {
             style: ReportLineStyle::SubHeading,
             marker: None,
@@ -637,21 +714,14 @@ fn strip_ordered_list_marker(line: &str) -> Option<(String, String)> {
     let remainder = &line[digits_end..];
     for separator in [".", "、", ")", "）"] {
         if let Some(rest) = remainder.strip_prefix(separator) {
-            return Some((
-                format!("{number}{separator}"),
-                rest.trim().to_string(),
-            ));
+            return Some((format!("{number}{separator}"), rest.trim().to_string()));
         }
     }
 
     None
 }
 
-fn add_markdown_runs(
-    mut paragraph: Paragraph,
-    text: &str,
-    style: ReportLineStyle,
-) -> Paragraph {
+fn add_markdown_runs(mut paragraph: Paragraph, text: &str, style: ReportLineStyle) -> Paragraph {
     let segments: Vec<&str> = text.split("**").collect();
     let has_markdown = segments.len() > 1;
 
@@ -713,8 +783,12 @@ async fn read_api_response_body(
         let response_text = response
             .text()
             .await
-            .map_err(|e| format!("读取 OpenAI API 响应失败: {e}"))?;
-        Ok(parse_api_response_body(&response_text, &content_type, protocol))
+            .map_err(|e| format!("读取 AI API 响应失败: {e}"))?;
+        Ok(parse_api_response_body(
+            &response_text,
+            &content_type,
+            protocol,
+        ))
     }
 }
 
@@ -770,7 +844,7 @@ async fn consume_sse_response_body(
     let mut state = StreamingParseState::default();
 
     while let Some(chunk) = stream.next().await {
-        let bytes = chunk.map_err(|e| format!("读取 OpenAI API 流式响应失败: {e}"))?;
+        let bytes = chunk.map_err(|e| format!("读取 AI API 流式响应失败: {e}"))?;
         let chunk_text = String::from_utf8_lossy(&bytes);
         raw_response.push_str(&chunk_text);
         normalized_buffer.push_str(&chunk_text.replace("\r\n", "\n"));
@@ -1111,7 +1185,11 @@ struct ParsedReportLine {
 
 fn sanitize_inline_text(value: &str, fallback: &str) -> String {
     let trimmed = value.trim();
-    let source = if trimmed.is_empty() { fallback } else { trimmed };
+    let source = if trimmed.is_empty() {
+        fallback
+    } else {
+        trimmed
+    };
     source.replace('\n', " ").replace('\r', " ")
 }
 
@@ -1251,13 +1329,43 @@ mod tests {
     use super::*;
 
     #[test]
+    fn resolve_api_target_supports_deepseek_base_urls() {
+        let target = resolve_api_target("https://api.deepseek.com");
+        assert_eq!(target.endpoint, "https://api.deepseek.com/chat/completions");
+        assert!(matches!(target.protocol, ApiProtocol::ChatCompletions));
+
+        let target = resolve_api_target("https://api.deepseek.com/v1");
+        assert_eq!(
+            target.endpoint,
+            "https://api.deepseek.com/v1/chat/completions"
+        );
+        assert!(matches!(target.protocol, ApiProtocol::ChatCompletions));
+    }
+
+    #[test]
+    fn resolve_api_target_keeps_openai_v1_on_responses() {
+        let target = resolve_api_target("https://api.openai.com/v1");
+        assert_eq!(target.endpoint, "https://api.openai.com/v1/responses");
+        assert!(matches!(target.protocol, ApiProtocol::Responses));
+    }
+
+    #[test]
+    fn extract_error_message_supports_top_level_detail() {
+        let response_json = serde_json::json!({ "detail": "Not Found" });
+        assert_eq!(extract_error_message(&response_json), "Not Found");
+    }
+
+    #[test]
     fn prepare_report_lines_skips_export_metadata_and_duplicate_title() {
         let lines = prepare_report_lines(
             "week",
             "时间范围：2026-03-30 00:00:00 至 2026-04-02 22:52:55\n导出时间：2026-04-02 22:53:25\n\n### 周报（2026-03-30 至 2026-04-02）\n\n#### 总览\n本周完成了修复。\n",
         );
 
-        assert_eq!(lines, vec!["#### 总览".to_string(), "本周完成了修复。".to_string()]);
+        assert_eq!(
+            lines,
+            vec!["#### 总览".to_string(), "本周完成了修复。".to_string()]
+        );
     }
 
     #[test]

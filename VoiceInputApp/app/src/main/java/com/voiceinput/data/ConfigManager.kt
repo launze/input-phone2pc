@@ -19,6 +19,8 @@ class ConfigManager(context: Context) {
         private const val KEY_NOTIFICATION_ENABLED = "notification_enabled"
         private const val KEY_PAIRED_DEVICES = "paired_devices"
         private const val KEY_LAST_TARGET_DEVICE = "last_target_device"
+        private const val LEGACY_SERVER_URL = "wss://nas.smarthome2020.top:7070"
+        private const val DEFAULT_SERVER_URL = "wss://ha.wwszxc.tax:16908"
     }
 
     // 保存服务器配置
@@ -31,7 +33,14 @@ class ConfigManager(context: Context) {
     fun loadServerConfig(): ServerConfig {
         val json = prefs.getString(KEY_SERVER_CONFIG, null)
         return if (json != null) {
-            gson.fromJson(json, ServerConfig::class.java)
+            val config = gson.fromJson(json, ServerConfig::class.java)
+            if (config.serverUrl == LEGACY_SERVER_URL) {
+                val migrated = config.copy(serverUrl = DEFAULT_SERVER_URL)
+                saveServerConfig(migrated)
+                migrated
+            } else {
+                config
+            }
         } else {
             ServerConfig() // 返回默认配置
         }

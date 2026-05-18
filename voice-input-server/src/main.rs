@@ -2,7 +2,6 @@ mod crypto;
 mod db;
 mod device_manager;
 mod protocol;
-mod updates;
 
 use anyhow::Result;
 use db::PairingDb;
@@ -17,7 +16,6 @@ use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::mpsc;
 use tokio_tungstenite::{accept_async, tungstenite::Message};
 use tracing::{error, info, warn};
-use updates::UpdateService;
 use uuid::Uuid;
 
 use rustls::{Certificate, PrivateKey, ServerConfig};
@@ -80,14 +78,6 @@ async fn main() -> Result<()> {
     tracing_subscriber::fmt::init();
 
     let pairing_db = Arc::new(PairingDb::new("pairings.db")?);
-    let update_service = Arc::new(UpdateService::new()?);
-
-    let update_service_clone = update_service.clone();
-    tokio::spawn(async move {
-        if let Err(error) = updates::start_http_server(update_service_clone).await {
-            error!("update http server error: {}", error);
-        }
-    });
 
     let tls_acceptor = match load_tls_config() {
         Ok(config) => {
@@ -100,7 +90,7 @@ async fn main() -> Result<()> {
         }
     };
 
-    let addr = "0.0.0.0:7070";
+    let addr = "0.0.0.0:16908";
     let listener = TcpListener::bind(addr).await?;
     info!("relay server listening on {}", addr);
 

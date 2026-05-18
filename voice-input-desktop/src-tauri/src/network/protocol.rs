@@ -26,7 +26,12 @@ pub enum Message {
     #[serde(rename = "PAIR_RESPONSE")]
     PairResponse { success: bool, message: String },
     #[serde(rename = "TEXT_INPUT")]
-    TextInput { text: String, timestamp: i64 },
+    TextInput {
+        text: String,
+        timestamp: i64,
+        #[serde(default)]
+        press_enter: bool,
+    },
     #[serde(rename = "INPUT_ACK")]
     InputAck { success: bool, timestamp: i64 },
     #[serde(rename = "HEARTBEAT")]

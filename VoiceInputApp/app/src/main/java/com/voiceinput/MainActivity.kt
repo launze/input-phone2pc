@@ -62,8 +62,7 @@ fun MainScreen() {
         composable("settings") {
             SettingsScreen(
                 viewModel = viewModel,
-                onBack = { navController.popBackStack() },
-                onNavigateToScanner = { navController.navigate("scanner") }
+                onBack = { navController.popBackStack() }
             )
         }
 
