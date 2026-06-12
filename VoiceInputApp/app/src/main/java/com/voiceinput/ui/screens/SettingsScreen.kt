@@ -1,5 +1,6 @@
 package com.voiceinput.ui.screens
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -9,7 +10,10 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import android.content.Intent
+import android.net.Uri
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
 import com.voiceinput.BuildConfig
 import com.voiceinput.data.ConfigManager
@@ -328,6 +332,24 @@ fun SettingsScreen(
                     InfoRow("版本", "v${BuildConfig.VERSION_NAME}")
                     InfoRow("UDP 端口", "58888")
                     InfoRow("TCP 端口", "58889")
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text(text = "GitHub", style = MaterialTheme.typography.bodyMedium)
+                        Text(
+                            text = "launze/input-phone2pc",
+                            style = MaterialTheme.typography.bodyMedium.copy(
+                                textDecoration = TextDecoration.Underline,
+                                color = MaterialTheme.colorScheme.primary
+                            ),
+                            modifier = Modifier.clickable {
+                                val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://github.com/launze/input-phone2pc"))
+                                context.startActivity(intent)
+                            }
+                        )
+                    }
 
                     if (updateMessage.isNotBlank()) {
                         Text(

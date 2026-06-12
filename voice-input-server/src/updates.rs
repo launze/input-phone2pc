@@ -415,6 +415,7 @@ fn render_download_page(service: &UpdateService, channel: &str) -> Result<String
         </div>
       </div>
       <p style="margin-top: 14px;">当前版本 {version}，频道 {channel}</p>
+      <p style="margin-top: 8px;"><a href="https://github.com/launze/input-phone2pc" style="color: #0f6bcb;">GitHub 仓库：github.com/launze/input-phone2pc</a></p>
     </header>
     <section>
       <h2>Android App</h2>
