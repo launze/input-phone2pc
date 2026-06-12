@@ -295,6 +295,7 @@ fn render_download_page(service: &UpdateService, channel: &str) -> Result<String
 
     let mut android = Vec::new();
     let mut desktop = Vec::new();
+    let mut tools = Vec::new();
     let mut android_version = None;
     let mut desktop_version = None;
 
@@ -309,6 +310,14 @@ fn render_download_page(service: &UpdateService, channel: &str) -> Result<String
                     .map(|asset| render_asset_item(channel, release, asset)),
             );
         }
+
+        tools.extend(
+            release
+                .assets
+                .iter()
+                .filter(|asset| is_tool_asset(asset))
+                .map(|asset| render_asset_item(channel, release, asset)),
+        );
 
         if desktop_version.is_none() && release.assets.iter().any(is_desktop_asset)
         {
@@ -336,6 +345,11 @@ fn render_download_page(service: &UpdateService, channel: &str) -> Result<String
         "<li><span>暂无 PC 客户端安装包</span></li>".to_string()
     } else {
         desktop.join("\n")
+    };
+    let tool_list = if tools.is_empty() {
+        "<li><span>暂无文件二维码生成工具</span></li>".to_string()
+    } else {
+        tools.join("\n")
     };
     let notes = markdownish_to_html(
         manifest
@@ -411,6 +425,11 @@ fn render_download_page(service: &UpdateService, channel: &str) -> Result<String
       <ul>{desktop_list}</ul>
     </section>
     <section>
+      <h2>文件二维码生成工具</h2>
+      <p style="margin-bottom: 12px;">用于在电脑端选择文件并生成文件二维码，手机端可通过扫码传输文件功能接收。</p>
+      <ul>{tool_list}</ul>
+    </section>
+    <section>
       <h2>更新说明</h2>
       <div class="notes">{notes}</div>
     </section>
@@ -421,6 +440,7 @@ fn render_download_page(service: &UpdateService, channel: &str) -> Result<String
         channel = html_escape(channel),
         android_list = android_list,
         desktop_list = desktop_list,
+        tool_list = tool_list,
         notes = notes,
     ))
 }
@@ -434,6 +454,10 @@ fn is_desktop_asset(asset: &AssetEntry) -> bool {
         asset.platform.to_ascii_lowercase().as_str(),
         "windows" | "macos" | "linux"
     )
+}
+
+fn is_tool_asset(asset: &AssetEntry) -> bool {
+    asset.platform.eq_ignore_ascii_case("tool") || asset.file_name.contains("file-qr-generator")
 }
 
 fn render_asset_item(channel: &str, release: &ReleaseEntry, asset: &AssetEntry) -> String {

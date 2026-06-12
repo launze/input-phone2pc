@@ -14,6 +14,7 @@ DEFAULT_REPO = "launze/input-phone2pc"
 ASSET_PATTERNS = [
     "voiceinput-android-",
     "voiceinput-desktop-",
+    "voiceinput-file-qr-generator-",
 ]
 
 
@@ -54,6 +55,8 @@ def classify_asset(name: str):
     lower = name.lower()
     if lower.endswith(".apk"):
         return ("android", "universal")
+    if "file-qr-generator" in lower:
+        return ("tool", "universal")
     if "windows-x64" in lower:
         return ("windows", "x64")
     if "macos-arm64" in lower:

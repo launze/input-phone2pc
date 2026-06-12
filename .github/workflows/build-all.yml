@@ -24,7 +24,7 @@ jobs:
     - uses: actions/checkout@v4
 
     - name: Setup Rust
-      uses: dtolnay/rust-toolchain@nightly
+      uses: dtolnay/rust-toolchain@stable
 
     - name: Cache cargo registry
       uses: actions/cache@v4
@@ -100,6 +100,13 @@ jobs:
       working-directory: VoiceInputApp
       run: ./gradlew assembleRelease
 
+    - name: Prepare file QR generator tool
+      shell: bash
+      run: |
+        mkdir -p release-assets/tools/file-qr-generator
+        cp "voice-input-server/tools/file-qr-generator/语传文件二维码生成工具.html" "release-assets/tools/file-qr-generator/语传文件二维码生成工具.html"
+        (cd release-assets/tools/file-qr-generator && zip -9 -r "../voiceinput-file-qr-generator-v${GITHUB_REF_NAME#v}.zip" .)
+
     - name: Prepare Android release asset
       working-directory: VoiceInputApp
       run: |
@@ -111,6 +118,13 @@ jobs:
       with:
         name: voiceinput-android-release
         path: VoiceInputApp/release-assets/voiceinput-android-v*.apk
+        if-no-files-found: error
+
+    - name: Upload File QR Generator Tool
+      uses: actions/upload-artifact@v4
+      with:
+        name: voiceinput-file-qr-generator
+        path: release-assets/tools/voiceinput-file-qr-generator-v*.zip
         if-no-files-found: error
 
   build-desktop:
@@ -149,7 +163,7 @@ jobs:
         cache-dependency-path: voice-input-desktop/package-lock.json
 
     - name: Setup Rust
-      uses: dtolnay/rust-toolchain@nightly
+      uses: dtolnay/rust-toolchain@stable
 
     - name: Install dependencies (Ubuntu)
       if: matrix.os == 'linux'
@@ -300,6 +314,7 @@ jobs:
           - 手机端显示真实版本号，支持手动检查更新、下载并安装新 APK。
           - 电脑端显示真实版本号，支持手动检查更新、下载并打开安装包。
           - 下载页面改为“语传-手机转电脑语音输入助手”，补充手机端和电脑端功能介绍。
+          - 下载页面新增文件二维码生成工具，用于在电脑端选择文件并生成文件二维码。
           - 扫码传输文件修复竖屏摄像头方向、OpenCV 初始化和连续解码问题。
           - 历史记录进入页面或内容更新后自动滚动到最新记录。
           - 图标更新为扁平简约风格。
