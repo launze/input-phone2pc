@@ -2,6 +2,7 @@ mod crypto;
 mod db;
 mod device_manager;
 mod protocol;
+mod updates;
 
 use anyhow::Result;
 use db::PairingDb;
@@ -16,6 +17,7 @@ use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::mpsc;
 use tokio_tungstenite::{accept_async, tungstenite::Message};
 use tracing::{error, info, warn};
+use updates::{start_http_server, UpdateService};
 use uuid::Uuid;
 
 use rustls::{Certificate, PrivateKey, ServerConfig};
@@ -78,6 +80,13 @@ async fn main() -> Result<()> {
     tracing_subscriber::fmt::init();
 
     let pairing_db = Arc::new(PairingDb::new("pairings.db")?);
+    let update_service = Arc::new(UpdateService::new()?);
+    let update_service_clone = update_service.clone();
+    tokio::spawn(async move {
+        if let Err(error) = start_http_server(update_service_clone).await {
+            error!("update http server stopped: {}", error);
+        }
+    });
 
     let tls_acceptor = match load_tls_config() {
         Ok(config) => {
@@ -641,25 +650,44 @@ fn validate_relay_payload(payload: &serde_json::Value) -> std::result::Result<()
         .and_then(|v| v.as_str())
         .unwrap_or_default();
 
-    if payload_type != "CLIPBOARD_IMAGE" {
-        return Ok(());
-    }
+    match payload_type {
+        "CLIPBOARD_IMAGE" => {
+            let image_data = payload
+                .get("data")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| "missing image data".to_string())?;
+            let mime_type = payload
+                .get("mime_type")
+                .and_then(|v| v.as_str())
+                .unwrap_or_default();
 
-    let image_data = payload
-        .get("data")
-        .and_then(|v| v.as_str())
-        .ok_or_else(|| "missing image data".to_string())?;
-    let mime_type = payload
-        .get("mime_type")
-        .and_then(|v| v.as_str())
-        .unwrap_or_default();
+            if !matches!(mime_type, "image/jpeg" | "image/png") {
+                return Err("unsupported image mime type".to_string());
+            }
 
-    if !matches!(mime_type, "image/jpeg" | "image/png") {
-        return Err("unsupported image mime type".to_string());
-    }
+            if image_data.len() > 6_000_000 {
+                return Err("image payload too large".to_string());
+            }
+        }
+        "CLIPBOARD_FILE" => {
+            let file_data = payload
+                .get("data")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| "missing file data".to_string())?;
+            let file_name = payload
+                .get("file_name")
+                .and_then(|v| v.as_str())
+                .unwrap_or_default();
 
-    if image_data.len() > 6_000_000 {
-        return Err("image payload too large".to_string());
+            if file_name.trim().is_empty() {
+                return Err("missing file name".to_string());
+            }
+
+            if file_data.len() > 6_000_000 {
+                return Err("file payload too large".to_string());
+            }
+        }
+        _ => {}
     }
 
     Ok(())

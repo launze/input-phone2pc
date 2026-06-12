@@ -1,7 +1,7 @@
 {
   "name": "voice-input-desktop",
-  "version": "1.2.0",
-  "description": "跨平台语音输入桌面客户端",
+  "version": "1.2.5",
+  "description": "手机转电脑语音输入助手",
   "type": "module",
   "scripts": {
     "dev": "tauri dev",

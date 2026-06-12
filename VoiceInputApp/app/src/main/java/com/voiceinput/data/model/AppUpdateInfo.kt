@@ -1,20 +1,22 @@
 package com.voiceinput.data.model
 
+import com.google.gson.annotations.SerializedName
+
 data class AppUpdateInfo(
-    val hasUpdate: Boolean,
-    val latestVersion: String,
-    val minimumSupportedVersion: String? = null,
-    val forceUpdate: Boolean = false,
-    val releaseNotes: String = "",
+    @SerializedName("has_update") val hasUpdate: Boolean,
+    @SerializedName("latest_version") val latestVersion: String,
+    @SerializedName("minimum_supported_version") val minimumSupportedVersion: String? = null,
+    @SerializedName("force_update") val forceUpdate: Boolean = false,
+    @SerializedName("release_notes") val releaseNotes: String = "",
     val asset: AppUpdateAsset? = null
 )
 
 data class AppUpdateAsset(
-    val fileName: String,
-    val downloadUrl: String,
+    @SerializedName("file_name") val fileName: String,
+    @SerializedName("download_url") val downloadUrl: String,
     val sha256: String,
     val size: Long,
-    val mimeType: String
+    @SerializedName("mime_type") val mimeType: String
 )
 
 sealed class AppUpdateState {

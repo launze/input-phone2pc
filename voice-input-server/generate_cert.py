@@ -10,6 +10,7 @@ from cryptography.hazmat.primitives.asymmetric import rsa
 import datetime
 import os
 import ipaddress
+import sys
 
 def generate_self_signed_cert(hostname="ha.wwszxc.tax", output_dir="."):
     """生成自签名证书"""
@@ -30,11 +31,15 @@ def generate_self_signed_cert(hostname="ha.wwszxc.tax", output_dir="."):
     ])
     
     # 添加 Subject Alternative Name (SAN)
-    san = x509.SubjectAlternativeName([
-        x509.DNSName(hostname),
+    san_entries = [
         x509.DNSName("localhost"),
         x509.IPAddress(ipaddress.ip_address("127.0.0.1")),
-    ])
+    ]
+    try:
+        san_entries.append(x509.IPAddress(ipaddress.ip_address(hostname)))
+    except ValueError:
+        san_entries.append(x509.DNSName(hostname))
+    san = x509.SubjectAlternativeName(san_entries)
     
     # 构建证书
     cert = x509.CertificateBuilder().subject_name(
@@ -99,8 +104,9 @@ def generate_self_signed_cert(hostname="ha.wwszxc.tax", output_dir="."):
     return cert_path, key_path
 
 if __name__ == "__main__":
+    hostname = sys.argv[1] if len(sys.argv) > 1 else "ha.wwszxc.tax"
     print("正在生成自签名证书...")
-    cert_path, key_path = generate_self_signed_cert()
+    cert_path, key_path = generate_self_signed_cert(hostname)
     print(f"\n证书生成完成!")
     print(f"服务端使用 {cert_path} 和 {key_path} 启动 WSS 服务")
     print(f"请将 {cert_path} 复制到客户端目录")

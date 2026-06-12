@@ -24,4 +24,4 @@ rustls = "0.21"
 tokio-rustls = "0.24"
 rustls-pemfile = "1.0"
 rusqlite = { version = "0.31", features = ["bundled"] }
-
+axum = "0.7"

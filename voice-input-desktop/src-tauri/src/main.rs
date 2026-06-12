@@ -8,6 +8,7 @@ mod input;
 mod network;
 mod reporting;
 mod storage;
+mod update;
 
 use std::sync::Arc;
 use std::{fs, path::PathBuf};
@@ -46,6 +47,23 @@ fn set_server_mode(enabled: bool) -> Result<(), String> {
     let mut config = AppConfig::load();
     config.set_server_mode(enabled);
     config.save().map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn get_app_version() -> String {
+    env!("CARGO_PKG_VERSION").to_string()
+}
+
+#[tauri::command]
+async fn check_app_update() -> Result<update::UpdateInfo, String> {
+    update::check_update().await.map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn download_and_open_app_update(info: update::UpdateInfo) -> Result<String, String> {
+    update::download_and_open_update(info)
+        .await
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -471,6 +489,9 @@ pub fn run() {
             get_config,
             set_server_url,
             set_server_mode,
+            get_app_version,
+            check_app_update,
+            download_and_open_app_update,
             connect_server,
             disconnect_server,
             get_server_status,

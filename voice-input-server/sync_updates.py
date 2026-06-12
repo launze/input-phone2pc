@@ -14,7 +14,6 @@ DEFAULT_REPO = "launze/input-phone2pc"
 ASSET_PATTERNS = [
     "voiceinput-android-",
     "voiceinput-desktop-",
-    "voiceinput-server-",
 ]
 
 

@@ -5,10 +5,12 @@ import android.net.Uri
 import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.voiceinput.BuildConfig
 import com.google.gson.Gson
 import com.google.gson.JsonObject
 import com.voiceinput.data.ConfigManager
 import com.voiceinput.data.model.ClipboardImagePayload
+import com.voiceinput.data.model.ClipboardFilePayload
 import com.voiceinput.data.model.Device
 import com.voiceinput.data.model.HistoryItem
 import com.voiceinput.data.model.ServerConfig
@@ -18,6 +20,7 @@ import com.voiceinput.data.repository.HistoryRepository
 import com.voiceinput.network.NetworkManager
 import com.voiceinput.network.ServerConnection
 import com.voiceinput.util.ImageTransferCodec
+import com.voiceinput.util.FileTransferCodec
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -295,10 +298,10 @@ class InputViewModel(application: Application) : AndroidViewModel(application) {
             }
 
             if (success) {
-                if (contentType == "image") {
-                    addLog("电脑已接收图片 from $fromDeviceId")
-                } else {
-                    addLog("电脑已接收文本 from $fromDeviceId")
+                when (contentType) {
+                    "image" -> addLog("电脑已接收图片 from $fromDeviceId")
+                    "file" -> addLog("电脑已保存文件 from $fromDeviceId")
+                    else -> addLog("电脑已接收文本 from $fromDeviceId")
                 }
             } else {
                 addLog("电脑处理失败 from $fromDeviceId")
@@ -484,7 +487,7 @@ class InputViewModel(application: Application) : AndroidViewModel(application) {
                     deviceName = deviceName,
                     ip = localIp,
                     port = localPort,
-                    version = "1.0.0"
+                    version = BuildConfig.VERSION_NAME
                 )
                 val success = networkManager.connectToDevice(device)
                 if (success) {
@@ -614,6 +617,55 @@ class InputViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun sendFile(uri: Uri) {
+        viewModelScope.launch {
+            if (!ensureFileSendRoute()) {
+                addLog("未连接服务器，无法发送文件")
+                _uiMessages.tryEmit("未连接服务器，无法发送文件")
+                return@launch
+            }
+
+            addLog("正在读取文件...")
+            val payload = FileTransferCodec.encodeFromUri(getApplication(), uri)
+            if (payload == null) {
+                addLog("文件读取失败或文件过大")
+                _uiMessages.tryEmit("文件读取失败，或超过 4.5MB")
+                return@launch
+            }
+
+            if (!ensureFileSendRoute()) {
+                addLog("未连接服务器，无法发送文件")
+                _uiMessages.tryEmit("未连接服务器，无法发送文件")
+                return@launch
+            }
+
+            sendFileViaRelay(payload)
+        }
+    }
+
+    fun sendScannedFilePayload(
+        fileName: String,
+        mimeType: String,
+        base64Data: String,
+        size: Long
+    ) {
+        viewModelScope.launch {
+            if (!ensureFileSendRoute()) {
+                addLog("未连接服务器，无法发送扫码文件")
+                _uiMessages.tryEmit("未连接服务器，无法发送扫码文件")
+                return@launch
+            }
+
+            val payload = ClipboardFilePayload(
+                mimeType = mimeType.ifBlank { "application/octet-stream" },
+                fileName = fileName.ifBlank { "scanned-file-${System.currentTimeMillis()}" },
+                data = base64Data,
+                size = size
+            )
+            sendFileViaRelay(payload)
+        }
+    }
+
     private suspend fun ensureImageSendRoute(): Boolean {
         restoreRelayTargetIfNeeded()
 
@@ -665,6 +717,40 @@ class InputViewModel(application: Application) : AndroidViewModel(application) {
         updateSendAvailability()
         return (relayTargetDeviceId != null && serverConnection.isConnected()) ||
             networkManager.isConnected.value
+    }
+
+    private suspend fun ensureFileSendRoute(): Boolean {
+        restoreRelayTargetIfNeeded()
+
+        if (relayTargetDeviceId != null && serverConnection.isConnected()) {
+            updateSendAvailability()
+            return true
+        }
+
+        val targetId = relayTargetDeviceId
+        val serverUrl = configManager.getServerUrl()
+        if (!targetId.isNullOrBlank() && serverUrl.isNotBlank()) {
+            val state = serverConnection.connectionState.value
+            if (state is ServerConnection.ConnectionState.Connecting ||
+                state is ServerConnection.ConnectionState.Reconnecting
+            ) {
+                waitForServerConnected(timeoutMs = 3_000)
+            }
+
+            if (!serverConnection.isConnected()) {
+                addLog("发送文件前正在恢复服务器连接...")
+                reconnectServerForSend(serverUrl)
+            }
+
+            if (serverConnection.isConnected()) {
+                syncSelectedRelayDeviceStatus()
+                updateSendAvailability()
+                return true
+            }
+        }
+
+        updateSendAvailability()
+        return false
     }
 
     private fun restoreRelayTargetIfNeeded() {
@@ -724,7 +810,7 @@ class InputViewModel(application: Application) : AndroidViewModel(application) {
             deviceName = paired.deviceName,
             ip = paired.localIp,
             port = paired.localPort,
-            version = "1.0.0"
+            version = BuildConfig.VERSION_NAME
         )
     }
 
@@ -833,6 +919,44 @@ class InputViewModel(application: Application) : AndroidViewModel(application) {
             }
             addLog("图片发送失败")
             _uiMessages.tryEmit("图片发送失败，未提交到服务器")
+        }
+    }
+
+    private suspend fun sendFileViaRelay(payload: ClipboardFilePayload) {
+        val targetId = relayTargetDeviceId ?: return
+        val targetName = relayTargetDeviceName ?: targetId
+        val relayPayload = JsonObject().apply {
+            addProperty("type", "CLIPBOARD_FILE")
+            addProperty("mime_type", payload.mimeType)
+            addProperty("file_name", payload.fileName)
+            addProperty("data", payload.data)
+            addProperty("size", payload.size)
+            addProperty("timestamp", System.currentTimeMillis())
+        }
+
+        val historyItem = createHistoryItem(
+            text = "[文件] ${payload.fileName}",
+            targetDeviceId = targetId,
+            targetDeviceName = targetName,
+            contentType = "file",
+            channel = "server",
+            syncStatus = SyncStatus.PENDING
+        )
+        addHistoryItem(historyItem)
+
+        if (serverConnection.sendRelayMessage(targetId, relayPayload)) {
+            pendingRelayHistoryIds.addLast(historyItem.id)
+            addLog("已发送文件到 $targetName (中转): ${payload.fileName}")
+            _uiMessages.tryEmit("文件已发送")
+        } else {
+            updateHistoryItem(historyItem.id) { item ->
+                item.copy(
+                    syncStatus = SyncStatus.FAILED,
+                    errorMessage = "文件发送失败，未能提交到服务器"
+                )
+            }
+            addLog("文件发送失败")
+            _uiMessages.tryEmit("文件发送失败，未提交到服务器")
         }
     }
 

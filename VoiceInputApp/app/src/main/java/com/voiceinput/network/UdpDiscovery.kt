@@ -1,6 +1,7 @@
 package com.voiceinput.network
 
 import com.google.gson.Gson
+import com.voiceinput.BuildConfig
 import com.voiceinput.data.model.Device
 import com.voiceinput.data.model.Message
 import kotlinx.coroutines.Dispatchers
@@ -30,7 +31,7 @@ class UdpDiscovery {
                     val message = Message.Discover(
                         deviceId = deviceId,
                         deviceName = deviceName,
-                        version = "1.0.0"
+                        version = BuildConfig.VERSION_NAME
                     )
                     val json = gson.toJson(message)
                     val sendData = json.toByteArray()

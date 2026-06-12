@@ -1,0 +1,22 @@
+apply plugin: 'com.android.library'
+
+def opencvSdkPath = System.getenv("OPENCV_SDK") ?: opencvsdk
+
+android {
+    compileSdkVersion 34
+    buildToolsVersion "35.0.0"
+
+    defaultConfig {
+        minSdkVersion 21
+        targetSdkVersion 35
+    }
+
+    sourceSets {
+        main {
+            manifest.srcFile "${opencvSdkPath}/sdk/java/AndroidManifest.xml"
+            java.srcDirs = ["${opencvSdkPath}/sdk/java/src"]
+            aidl.srcDirs = ["${opencvSdkPath}/sdk/java/src"]
+            res.srcDirs = ["${opencvSdkPath}/sdk/java/res"]
+        }
+    }
+}

@@ -39,6 +39,13 @@ jobs:
         distribution: 'temurin'
         java-version: '17'
         cache: 'gradle'
+
+    - name: Download OpenCV Android SDK
+      shell: bash
+      run: |
+        curl -L -o opencv-android-sdk.zip https://github.com/opencv/opencv/releases/download/4.10.0/opencv-4.10.0-android-sdk.zip
+        unzip -q opencv-android-sdk.zip -d "$RUNNER_TEMP/opencv"
+        echo "OPENCV_SDK=$RUNNER_TEMP/opencv/OpenCV-android-sdk" >> "$GITHUB_ENV"
     
     - name: Grant execute permission for gradlew
       working-directory: VoiceInputApp

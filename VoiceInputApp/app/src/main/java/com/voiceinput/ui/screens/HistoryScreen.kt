@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Clear
@@ -64,13 +65,29 @@ fun HistoryScreen(
     var pendingExportFormat by remember { mutableStateOf("txt") }
     var pendingExportFileName by remember { mutableStateOf<String?>(null) }
     var pendingExportItems by remember { mutableStateOf<List<HistoryItem>>(emptyList()) }
+    val listState = rememberLazyListState()
+    var initialScrollCompleted by remember { mutableStateOf(false) }
 
     val filteredItems = remember(historyItems, selectedTab) {
         if (selectedTab == 1) {
             historyItems.filter { it.isPending || it.syncStatus == SyncStatus.FAILED }
         } else {
             historyItems
-        }
+        }.sortedWith(compareBy<HistoryItem> { it.timestamp }.thenBy { it.id })
+    }
+    val latestHistorySignature = remember(filteredItems) {
+        filteredItems.lastOrNull()?.let { item ->
+            listOf(
+                item.id,
+                item.timestamp,
+                item.contentType,
+                item.syncStatus.name,
+                item.text,
+                item.errorMessage.orEmpty(),
+                item.syncedAt ?: 0L,
+                item.storedAt ?: 0L
+            ).joinToString("|")
+        }.orEmpty()
     }
 
     val exportLauncher = rememberLauncherForActivityResult(
@@ -101,6 +118,24 @@ fun HistoryScreen(
     DisposableEffect(Unit) {
         onDispose {
             viewModel.reloadHistory()
+        }
+    }
+
+    LaunchedEffect(selectedTab, searchQuery) {
+        initialScrollCompleted = false
+    }
+
+    LaunchedEffect(latestHistorySignature) {
+        if (filteredItems.isEmpty()) {
+            initialScrollCompleted = false
+            return@LaunchedEffect
+        }
+
+        if (!initialScrollCompleted) {
+            listState.scrollToItem(filteredItems.lastIndex)
+            initialScrollCompleted = true
+        } else {
+            listState.animateScrollToItem(filteredItems.lastIndex)
         }
     }
 
@@ -247,12 +282,13 @@ fun HistoryScreen(
                 }
             } else {
                 LazyColumn(
+                    state = listState,
                     modifier = Modifier.fillMaxSize(),
                     contentPadding = PaddingValues(bottom = 24.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     items(
-                        items = filteredItems.sortedByDescending { it.timestamp },
+                        items = filteredItems,
                         key = { it.id }
                     ) { item ->
                         HistoryItemView(

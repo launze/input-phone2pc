@@ -77,6 +77,13 @@ jobs:
     - name: Setup Android SDK
       uses: android-actions/setup-android@v3
 
+    - name: Download OpenCV Android SDK
+      shell: bash
+      run: |
+        curl -L -o opencv-android-sdk.zip https://github.com/opencv/opencv/releases/download/4.10.0/opencv-4.10.0-android-sdk.zip
+        unzip -q opencv-android-sdk.zip -d "$RUNNER_TEMP/opencv"
+        echo "OPENCV_SDK=$RUNNER_TEMP/opencv/OpenCV-android-sdk" >> "$GITHUB_ENV"
+
     - name: Grant execute permission for gradlew
       working-directory: VoiceInputApp
       run: chmod +x gradlew
@@ -286,6 +293,15 @@ jobs:
         files: artifacts/**/*
         draft: false
         prerelease: false
-        generate_release_notes: true
+        generate_release_notes: false
+        body: |
+          ## 语传 1.2.5
+
+          - 手机端显示真实版本号，支持手动检查更新、下载并安装新 APK。
+          - 电脑端显示真实版本号，支持手动检查更新、下载并打开安装包。
+          - 下载页面改为“语传-手机转电脑语音输入助手”，补充手机端和电脑端功能介绍。
+          - 扫码传输文件修复竖屏摄像头方向、OpenCV 初始化和连续解码问题。
+          - 历史记录进入页面或内容更新后自动滚动到最新记录。
+          - 图标更新为扁平简约风格。
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

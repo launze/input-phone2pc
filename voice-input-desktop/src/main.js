@@ -15,6 +15,10 @@ document.addEventListener('DOMContentLoaded', async () => {
     const statusText = document.getElementById('status-text');
     const deviceNameEl = document.getElementById('device-name');
     const unpairBtn = document.getElementById('unpair-btn');
+    const appVersionEl = document.getElementById('app-version');
+    const checkUpdateBtn = document.getElementById('check-update-btn');
+    const installUpdateBtn = document.getElementById('install-update-btn');
+    const updateText = document.getElementById('update-text');
 
     const pairingSection = document.getElementById('pairing-section');
     const historySection = document.getElementById('history-section');
@@ -91,6 +95,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     let aiReportIgnoreScrollEvent = false;
     const AI_REPORT_SCROLL_THRESHOLD = 24;
     let editingHistoryRecordId = null;
+    let currentUpdateInfo = null;
+    let updateBusy = false;
 
     const REPORT_PERIODS = {
         week: {
@@ -220,6 +226,57 @@ document.addEventListener('DOMContentLoaded', async () => {
         quarterlyPromptTemplateInput.value = normalized.quarterly_prompt_template;
         halfYearPromptTemplateInput.value = normalized.half_year_prompt_template;
         yearlyPromptTemplateInput.value = normalized.yearly_prompt_template;
+    }
+
+    function setUpdateUi(message = '', { busy = false, updateInfo = currentUpdateInfo } = {}) {
+        updateBusy = busy;
+        currentUpdateInfo = updateInfo;
+        updateText.textContent = message;
+        checkUpdateBtn.disabled = busy;
+        const hasUpdate = Boolean(currentUpdateInfo?.has_update || currentUpdateInfo?.hasUpdate);
+        installUpdateBtn.disabled = busy || !hasUpdate;
+        installUpdateBtn.style.display = hasUpdate ? 'inline-flex' : 'none';
+    }
+
+    async function loadAppVersion() {
+        try {
+            const version = await invoke('get_app_version');
+            appVersionEl.textContent = `v${version}`;
+        } catch (error) {
+            console.error('读取版本失败:', error);
+            appVersionEl.textContent = 'v--';
+        }
+    }
+
+    async function checkForUpdate() {
+        if (updateBusy) return;
+        setUpdateUi('正在检查更新...', { busy: true, updateInfo: currentUpdateInfo });
+        try {
+            const info = await invoke('check_app_update');
+            currentUpdateInfo = info;
+            const latestVersion = info?.latest_version || info?.latestVersion || '';
+            if (info?.has_update || info?.hasUpdate) {
+                setUpdateUi(`发现 v${latestVersion}`, { busy: false, updateInfo: info });
+            } else {
+                setUpdateUi('当前已是最新版本', { busy: false, updateInfo: null });
+            }
+        } catch (error) {
+            console.error('检查更新失败:', error);
+            setUpdateUi(`检查失败: ${error}`, { busy: false, updateInfo: null });
+        }
+    }
+
+    async function downloadAndOpenUpdate() {
+        if (updateBusy || !currentUpdateInfo) return;
+        setUpdateUi('正在下载更新...', { busy: true, updateInfo: currentUpdateInfo });
+        try {
+            const savedPath = await invoke('download_and_open_app_update', { info: currentUpdateInfo });
+            setUpdateUi(`已下载: ${savedPath}`, { busy: false, updateInfo: null });
+            alert(`安装包已下载并打开：\n${savedPath}`);
+        } catch (error) {
+            console.error('下载更新失败:', error);
+            setUpdateUi(`下载失败: ${error}`, { busy: false, updateInfo: currentUpdateInfo });
+        }
     }
 
     function collectOpenAiConfigFromForm() {
@@ -896,6 +953,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     // ===== 2. 鍔犺浇閰嶇疆 =====
     try {
+        await loadAppVersion();
         await loadHistory();
         const config = await invoke('get_config');
         console.log('配置已加载:', config);
@@ -1040,6 +1098,14 @@ document.addEventListener('DOMContentLoaded', async () => {
         }
     }
     refreshQrBtn.addEventListener('click', loadQrCode);
+
+    checkUpdateBtn.addEventListener('click', async () => {
+        await checkForUpdate();
+    });
+
+    installUpdateBtn.addEventListener('click', async () => {
+        await downloadAndOpenUpdate();
+    });
 
     // ===== 鍙栨秷閰嶅 =====
     unpairBtn.addEventListener('click', async () => {

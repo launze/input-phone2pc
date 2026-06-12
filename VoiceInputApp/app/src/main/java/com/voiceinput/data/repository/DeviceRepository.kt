@@ -2,6 +2,7 @@ package com.voiceinput.data.repository
 
 import android.content.Context
 import android.content.SharedPreferences
+import com.voiceinput.BuildConfig
 import com.voiceinput.data.model.Device
 
 class DeviceRepository(context: Context) {
@@ -27,7 +28,7 @@ class DeviceRepository(context: Context) {
             deviceName = deviceName,
             ip = deviceIp,
             port = devicePort,
-            version = "1.0.0"
+            version = BuildConfig.VERSION_NAME
         )
     }
 

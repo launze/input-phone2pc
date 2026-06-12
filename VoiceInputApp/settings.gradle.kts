@@ -19,3 +19,5 @@ dependencyResolutionManagement {
 
 rootProject.name = "VoiceInputApp"
 include(":app")
+include(":opencv")
+project(":opencv").projectDir = File("opencv-lite")

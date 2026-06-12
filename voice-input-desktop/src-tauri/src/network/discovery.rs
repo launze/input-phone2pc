@@ -39,7 +39,7 @@ pub async fn start_discovery_service(_app_handle: AppHandle) -> Result<(), Box<d
                                 device_name: local_device_name,
                                 ip: get_local_ip().unwrap_or_else(|| "0.0.0.0".to_string()),
                                 port: TCP_PORT,
-                                version: "1.0.0".to_string(),
+                                version: env!("CARGO_PKG_VERSION").to_string(),
                             };
 
                             // 发送响应

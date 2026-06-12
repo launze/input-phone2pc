@@ -2,15 +2,14 @@ use anyhow::{anyhow, Result};
 use axum::{
     extract::{Path, Query, State},
     http::{header, HeaderMap, StatusCode},
-    response::{IntoResponse, Json, Response},
+    response::{IntoResponse, Json},
     routing::get,
     Router,
 };
 use serde::{Deserialize, Serialize};
 use std::{
     cmp::Ordering,
-    env,
-    fs,
+    env, fs,
     net::SocketAddr,
     path::{Path as FsPath, PathBuf},
     sync::Arc,
@@ -105,12 +104,22 @@ impl UpdateService {
         let manifest_path = self.root_dir.join(channel).join("manifest.json");
         let content = fs::read_to_string(&manifest_path)
             .map_err(|e| anyhow!("failed to read manifest {}: {}", manifest_path.display(), e))?;
-        let manifest: UpdateManifest = serde_json::from_str(&content)
-            .map_err(|e| anyhow!("failed to parse manifest {}: {}", manifest_path.display(), e))?;
+        let manifest: UpdateManifest = serde_json::from_str(&content).map_err(|e| {
+            anyhow!(
+                "failed to parse manifest {}: {}",
+                manifest_path.display(),
+                e
+            )
+        })?;
         Ok(manifest)
     }
 
-    pub fn resolve_download_path(&self, channel: &str, version: &str, file_name: &str) -> Result<PathBuf> {
+    pub fn resolve_download_path(
+        &self,
+        channel: &str,
+        version: &str,
+        file_name: &str,
+    ) -> Result<PathBuf> {
         let safe_name = PathBuf::from(file_name)
             .file_name()
             .ok_or_else(|| anyhow!("invalid file name"))?
@@ -122,20 +131,24 @@ impl UpdateService {
     pub fn check_update(&self, query: &UpdateCheckQuery) -> Result<UpdateCheckResponse> {
         let channel = query.channel.as_deref().unwrap_or("stable");
         let manifest = self.read_manifest(channel)?;
+        let arch = query.arch.as_deref().unwrap_or("universal");
+
         let release = manifest
             .releases
             .iter()
-            .find(|item| item.version == manifest.latest_version)
-            .ok_or_else(|| anyhow!("latest release {} not found in manifest", manifest.latest_version))?;
+            .find(|item| find_matching_asset(item, query, arch).is_some())
+            .ok_or_else(|| {
+                anyhow!(
+                    "no compatible asset found for platform {} arch {}",
+                    query.platform,
+                    arch
+                )
+            })?;
 
-        let arch = query.arch.as_deref().unwrap_or("universal");
-        let asset = release.assets.iter().find(|asset| {
-            asset.platform.eq_ignore_ascii_case(&query.platform)
-                && (asset.arch.eq_ignore_ascii_case(arch)
-                    || asset.arch.eq_ignore_ascii_case("universal"))
-        });
+        let asset = find_matching_asset(release, query, arch);
 
-        let has_update = compare_versions(&manifest.latest_version, &query.version)? == Ordering::Greater;
+        let has_update =
+            compare_versions(&release.version, &query.version)? == Ordering::Greater;
         let minimum_supported = manifest.minimum_supported_version.clone();
         let force_by_minimum = minimum_supported
             .as_deref()
@@ -156,7 +169,7 @@ impl UpdateService {
 
         Ok(UpdateCheckResponse {
             has_update,
-            latest_version: manifest.latest_version,
+            latest_version: release.version.clone(),
             minimum_supported_version: minimum_supported,
             force_update: release.force_update || force_by_minimum,
             release_notes: release.release_notes.clone(),
@@ -165,18 +178,60 @@ impl UpdateService {
     }
 }
 
+fn find_matching_asset<'a>(
+    release: &'a ReleaseEntry,
+    query: &UpdateCheckQuery,
+    arch: &str,
+) -> Option<&'a AssetEntry> {
+    release
+        .assets
+        .iter()
+        .find(|asset| asset_matches_query(asset, query, arch))
+}
+
+fn asset_matches_query(asset: &AssetEntry, query: &UpdateCheckQuery, arch: &str) -> bool {
+    asset.platform.eq_ignore_ascii_case(&query.platform)
+        && (asset.arch.eq_ignore_ascii_case(arch) || asset.arch.eq_ignore_ascii_case("universal"))
+}
+
 pub async fn start_http_server(service: Arc<UpdateService>) -> Result<()> {
     let state = UpdateHttpState { service };
     let app = Router::new()
+        .route("/", get(handle_download_page))
+        .route("/downloads", get(handle_download_page))
         .route("/api/updates/check", get(handle_check_update))
-        .route("/updates/download/:channel/:version/:file_name", get(handle_download))
+        .route(
+            "/updates/download/:channel/:version/:file_name",
+            get(handle_download),
+        )
         .with_state(state);
 
-    let addr: SocketAddr = "0.0.0.0:7071".parse()?;
+    let addr: SocketAddr = "0.0.0.0:16909".parse()?;
     let listener = tokio::net::TcpListener::bind(addr).await?;
     info!("update http server listening on {}", addr);
     axum::serve(listener, app).await?;
     Ok(())
+}
+
+async fn handle_download_page(State(state): State<UpdateHttpState>) -> impl IntoResponse {
+    match render_download_page(&state.service, "stable") {
+        Ok(html) => {
+            let mut headers = HeaderMap::new();
+            headers.insert(
+                header::CONTENT_TYPE,
+                "text/html; charset=utf-8".parse().unwrap(),
+            );
+            (StatusCode::OK, headers, html).into_response()
+        }
+        Err(error) => {
+            warn!("download page render failed: {}", error);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("failed to render download page: {}", error),
+            )
+                .into_response()
+        }
+    }
 }
 
 async fn handle_check_update(
@@ -232,6 +287,218 @@ async fn handle_download(
             (StatusCode::OK, headers, bytes).into_response()
         }
         Err(_) => (StatusCode::NOT_FOUND, "file not found").into_response(),
+    }
+}
+
+fn render_download_page(service: &UpdateService, channel: &str) -> Result<String> {
+    let manifest = service.read_manifest(channel)?;
+
+    let mut android = Vec::new();
+    let mut desktop = Vec::new();
+    let mut android_version = None;
+    let mut desktop_version = None;
+
+    for release in &manifest.releases {
+        if android_version.is_none() && release.assets.iter().any(is_android_asset) {
+            android_version = Some(release.version.clone());
+            android.extend(
+                release
+                    .assets
+                    .iter()
+                    .filter(|asset| is_android_asset(asset))
+                    .map(|asset| render_asset_item(channel, release, asset)),
+            );
+        }
+
+        if desktop_version.is_none() && release.assets.iter().any(is_desktop_asset)
+        {
+            desktop_version = Some(release.version.clone());
+            desktop.extend(
+                release
+                    .assets
+                    .iter()
+                    .filter(|asset| is_desktop_asset(asset))
+                    .map(|asset| render_asset_item(channel, release, asset)),
+            );
+        }
+
+        if android_version.is_some() && desktop_version.is_some() {
+            break;
+        }
+    }
+
+    let android_list = if android.is_empty() {
+        "<li><span>暂无 Android 安装包</span></li>".to_string()
+    } else {
+        android.join("\n")
+    };
+    let desktop_list = if desktop.is_empty() {
+        "<li><span>暂无 PC 客户端安装包</span></li>".to_string()
+    } else {
+        desktop.join("\n")
+    };
+    let notes = markdownish_to_html(
+        manifest
+            .releases
+            .iter()
+            .find(|item| item.version == manifest.latest_version)
+            .or_else(|| manifest.releases.first())
+            .map(|release| release.release_notes.as_str())
+            .unwrap_or_default(),
+    );
+
+    Ok(format!(
+        r#"<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+      <title>语传-手机转电脑语音输入助手</title>
+  <style>
+    :root {{ color-scheme: light; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }}
+    body {{ margin: 0; background: #f6f8fb; color: #172033; }}
+    main {{ width: min(920px, calc(100% - 32px)); margin: 0 auto; padding: 40px 0 56px; }}
+    header {{ margin-bottom: 28px; }}
+    h1 {{ margin: 0 0 10px; font-size: 32px; line-height: 1.2; }}
+    h2 {{ margin: 28px 0 12px; font-size: 20px; }}
+    p {{ margin: 0; color: #526070; }}
+    .intro {{ display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; margin-top: 18px; }}
+    .intro-card {{ background: #fff; border: 1px solid #d9e0ea; border-radius: 8px; padding: 16px; }}
+    .intro-card h2 {{ margin: 0 0 8px; font-size: 18px; }}
+    .intro-card p {{ line-height: 1.65; }}
+    section {{ background: #fff; border: 1px solid #d9e0ea; border-radius: 8px; padding: 20px; margin-top: 16px; }}
+    ul {{ list-style: none; padding: 0; margin: 0; display: grid; gap: 10px; }}
+    li {{ display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 12px 0; border-bottom: 1px solid #edf1f6; }}
+    li:last-child {{ border-bottom: 0; }}
+    a {{ color: #0f6bcb; font-weight: 650; text-decoration: none; overflow-wrap: anywhere; }}
+    a:hover {{ text-decoration: underline; }}
+    span {{ color: #667386; font-size: 14px; white-space: nowrap; }}
+    .notes {{ color: #344054; line-height: 1.65; }}
+    .notes p {{ margin: 8px 0; color: #344054; }}
+    @media (max-width: 640px) {{
+      main {{ width: min(100% - 24px, 920px); padding-top: 28px; }}
+      h1 {{ font-size: 26px; }}
+      .intro {{ grid-template-columns: 1fr; }}
+      section {{ padding: 16px; }}
+      li {{ align-items: flex-start; flex-direction: column; gap: 4px; }}
+      span {{ white-space: normal; }}
+    }}
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <h1>语传-手机转电脑语音输入助手</h1>
+      <p>手机端语音、文字、图片和文件快速发送到电脑端；电脑端接收后可复制、编辑、插入到光标位置，并管理历史记录。</p>
+      <div class="intro">
+        <div class="intro-card">
+          <h2>手机端</h2>
+          <p>支持语音输入、文字发送、图片发送、扫码接收文件、历史记录查看，以及手动检查和安装新版本。</p>
+        </div>
+        <div class="intro-card">
+          <h2>电脑端</h2>
+          <p>支持扫码配对、自动接收手机内容、文字工作区、历史记录导出、AI 报告生成，以及手动检查和下载新版本。</p>
+        </div>
+      </div>
+      <p style="margin-top: 14px;">当前版本 {version}，频道 {channel}</p>
+    </header>
+    <section>
+      <h2>Android App</h2>
+      <ul>{android_list}</ul>
+    </section>
+    <section>
+      <h2>PC 客户端</h2>
+      <ul>{desktop_list}</ul>
+    </section>
+    <section>
+      <h2>更新说明</h2>
+      <div class="notes">{notes}</div>
+    </section>
+  </main>
+</body>
+</html>"#,
+        version = html_escape(&manifest.latest_version),
+        channel = html_escape(channel),
+        android_list = android_list,
+        desktop_list = desktop_list,
+        notes = notes,
+    ))
+}
+
+fn is_android_asset(asset: &AssetEntry) -> bool {
+    asset.file_name.ends_with(".apk") || asset.platform.eq_ignore_ascii_case("android")
+}
+
+fn is_desktop_asset(asset: &AssetEntry) -> bool {
+    matches!(
+        asset.platform.to_ascii_lowercase().as_str(),
+        "windows" | "macos" | "linux"
+    )
+}
+
+fn render_asset_item(channel: &str, release: &ReleaseEntry, asset: &AssetEntry) -> String {
+    let url = format!(
+        "/updates/download/{}/{}/{}",
+        channel,
+        release.version,
+        url_path_escape(&asset.file_name)
+    );
+    format!(
+        r#"<li><a href="{url}">{name}</a><span>{platform} {arch} - {size}</span></li>"#,
+        url = url,
+        name = html_escape(&asset.file_name),
+        platform = html_escape(&asset.platform),
+        arch = html_escape(&asset.arch),
+        size = format_size(asset.size),
+    )
+}
+
+fn format_size(size: u64) -> String {
+    const KB: f64 = 1024.0;
+    const MB: f64 = KB * 1024.0;
+    const GB: f64 = MB * 1024.0;
+    let size = size as f64;
+    if size >= GB {
+        format!("{:.2} GB", size / GB)
+    } else if size >= MB {
+        format!("{:.2} MB", size / MB)
+    } else if size >= KB {
+        format!("{:.1} KB", size / KB)
+    } else {
+        format!("{} B", size as u64)
+    }
+}
+
+fn html_escape(value: &str) -> String {
+    value
+        .replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+        .replace('\'', "&#39;")
+}
+
+fn url_path_escape(value: &str) -> String {
+    value
+        .replace('%', "%25")
+        .replace('#', "%23")
+        .replace('?', "%3F")
+}
+
+fn markdownish_to_html(value: &str) -> String {
+    let paragraphs: Vec<String> = value
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .map(|line| {
+            let line = line.trim_start_matches('#').trim_start_matches("- ").trim();
+            format!("<p>{}</p>", html_escape(line))
+        })
+        .collect();
+    if paragraphs.is_empty() {
+        "<p>暂无更新说明。</p>".to_string()
+    } else {
+        paragraphs.join("\n")
     }
 }
 

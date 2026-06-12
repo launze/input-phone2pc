@@ -4,6 +4,7 @@ import android.content.Context
 import android.util.Log
 import com.google.gson.Gson
 import com.google.gson.JsonObject
+import com.voiceinput.BuildConfig
 import com.voiceinput.R
 import com.voiceinput.data.model.ServerDeviceInfo
 import com.voiceinput.data.model.ServerMsg
@@ -267,7 +268,7 @@ class ServerConnection(private val context: Context) {
     private fun sendRegister(deviceId: String, deviceName: String) {
         val msg = ServerMsg(
             type = "SERVER_REGISTER", deviceId = deviceId,
-            deviceName = deviceName, deviceType = "android", version = "1.2.0"
+            deviceName = deviceName, deviceType = "android", version = BuildConfig.VERSION_NAME
         )
         sendRaw(gson.toJson(msg))
     }

@@ -94,6 +94,7 @@ fun InputScreen(
     viewModel: InputViewModel = viewModel(),
     onNavigateToSettings: () -> Unit = {},
     onNavigateToScanner: () -> Unit = {},
+    onNavigateToFileScanner: () -> Unit = {},
     onNavigateToHistory: () -> Unit = {}
 ) {
     val connectionStatus by viewModel.connectionStatus.collectAsState()
@@ -112,12 +113,34 @@ fun InputScreen(
     var pendingCameraUri by remember { mutableStateOf<Uri?>(null) }
     val listState = rememberLazyListState()
     var initialScrollCompleted by remember { mutableStateOf(false) }
+    val latestHistorySignature = remember(historyItems) {
+        historyItems.lastOrNull()?.let { item ->
+            listOf(
+                item.id,
+                item.timestamp,
+                item.contentType,
+                item.syncStatus.name,
+                item.text,
+                item.errorMessage.orEmpty(),
+                item.syncedAt ?: 0L,
+                item.storedAt ?: 0L
+            ).joinToString("|")
+        }.orEmpty()
+    }
 
     val imagePickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.PickVisualMedia()
     ) { uri ->
         if (uri != null) {
             viewModel.sendImage(uri)
+        }
+    }
+
+    val filePickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        if (uri != null) {
+            viewModel.sendFile(uri)
         }
     }
 
@@ -175,7 +198,7 @@ fun InputScreen(
         }
     }
 
-    LaunchedEffect(historyInitialLoaded, historyItems.size) {
+    LaunchedEffect(historyInitialLoaded, latestHistorySignature) {
         if (!historyInitialLoaded) {
             return@LaunchedEffect
         }
@@ -188,6 +211,8 @@ fun InputScreen(
         if (!initialScrollCompleted) {
             listState.scrollToItem(historyItems.lastIndex)
             initialScrollCompleted = true
+        } else {
+            listState.animateScrollToItem(historyItems.lastIndex)
         }
     }
 
@@ -420,6 +445,10 @@ fun InputScreen(
                             PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
                         )
                     },
+                    onPickFile = {
+                        filePickerLauncher.launch(arrayOf("*/*"))
+                    },
+                    onScanFile = onNavigateToFileScanner,
                     onTakePhoto = {
                         if (
                             ContextCompat.checkSelfPermission(

@@ -11,9 +11,13 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import com.voiceinput.BuildConfig
 import com.voiceinput.data.ConfigManager
+import com.voiceinput.data.model.AppUpdateInfo
 import com.voiceinput.network.ServerConnection
+import com.voiceinput.update.AppUpdateManager
 import com.voiceinput.viewmodel.InputViewModel
+import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -23,10 +27,16 @@ fun SettingsScreen(
 ) {
     val context = LocalContext.current
     val configManager = remember { ConfigManager(context) }
+    val updateManager = remember { AppUpdateManager(context) }
+    val scope = rememberCoroutineScope()
 
     var serverModeEnabled by remember { mutableStateOf(configManager.isServerModeEnabled()) }
     var serverUrl by remember { mutableStateOf(configManager.getServerUrl()) }
     var showCustomUrl by remember { mutableStateOf(false) }
+    var updateChecking by remember { mutableStateOf(false) }
+    var updateInstalling by remember { mutableStateOf(false) }
+    var updateInfo by remember { mutableStateOf<AppUpdateInfo?>(null) }
+    var updateMessage by remember { mutableStateOf("") }
 
     val connectionState by viewModel.serverConnectionState.collectAsState()
     val connectionLog by viewModel.connectionLog.collectAsState()
@@ -130,7 +140,7 @@ fun SettingsScreen(
                                 configManager.saveServerUrl(it)
                             },
                             label = { Text("服务器地址") },
-                            placeholder = { Text("wss://ha.wwszxc.tax:16908") },
+                            placeholder = { Text("wss://8.153.163.104:16908") },
                             modifier = Modifier.fillMaxWidth(),
                             leadingIcon = {
                                 Icon(Icons.Default.Cloud, "服务器")
@@ -314,9 +324,91 @@ fun SettingsScreen(
                         style = MaterialTheme.typography.titleMedium
                     )
 
-                    InfoRow("版本", "v1.2.0")
+                    InfoRow("软件", "语传")
+                    InfoRow("版本", "v${BuildConfig.VERSION_NAME}")
                     InfoRow("UDP 端口", "58888")
                     InfoRow("TCP 端口", "58889")
+
+                    if (updateMessage.isNotBlank()) {
+                        Text(
+                            text = updateMessage,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = if (updateMessage.contains("失败") || updateMessage.contains("错误")) {
+                                MaterialTheme.colorScheme.error
+                            } else {
+                                MaterialTheme.colorScheme.onSurfaceVariant
+                            }
+                        )
+                    }
+
+                    updateInfo?.takeIf { it.hasUpdate }?.let { info ->
+                        Text(
+                            text = "发现新版本 v${info.latestVersion}",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                        if (info.releaseNotes.isNotBlank()) {
+                            Text(
+                                text = info.releaseNotes,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        OutlinedButton(
+                            onClick = {
+                                scope.launch {
+                                    updateChecking = true
+                                    updateMessage = "正在检查更新..."
+                                    try {
+                                        val info = updateManager.checkUpdate()
+                                        updateInfo = info
+                                        updateMessage = if (info.hasUpdate) {
+                                            "可以更新到 v${info.latestVersion}"
+                                        } else {
+                                            "当前已是最新版本 v${BuildConfig.VERSION_NAME}"
+                                        }
+                                    } catch (error: Exception) {
+                                        updateMessage = "检查更新失败: ${error.message ?: "未知错误"}"
+                                    } finally {
+                                        updateChecking = false
+                                    }
+                                }
+                            },
+                            enabled = !updateChecking && !updateInstalling,
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Text(if (updateChecking) "检查中..." else "检查更新")
+                        }
+
+                        Button(
+                            onClick = {
+                                val info = updateInfo ?: return@Button
+                                scope.launch {
+                                    updateInstalling = true
+                                    updateMessage = "正在下载安装包..."
+                                    try {
+                                        val file = updateManager.downloadApk(info)
+                                        updateMessage = "下载完成，正在打开安装程序。"
+                                        updateManager.installApk(file)
+                                    } catch (error: Exception) {
+                                        updateMessage = "更新失败: ${error.message ?: "未知错误"}"
+                                    } finally {
+                                        updateInstalling = false
+                                    }
+                                }
+                            },
+                            enabled = updateInfo?.hasUpdate == true && !updateChecking && !updateInstalling,
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Text(if (updateInstalling) "下载中..." else "下载更新")
+                        }
+                    }
                 }
             }
         }

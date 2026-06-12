@@ -6,6 +6,10 @@ pub mod websocket;
 use crate::storage::history::{self, NewHistoryRecord};
 use base64::Engine;
 use std::error::Error;
+use std::fs;
+use std::io;
+use std::path::{Path, PathBuf};
+use std::process::Command;
 use tauri::{AppHandle, Emitter};
 use uuid::Uuid;
 
@@ -46,7 +50,7 @@ pub async fn connect_and_register(
                 "device_id": device_id,
                 "device_name": device_name,
                 "device_type": "desktop",
-                "version": "1.2.0"
+                "version": env!("CARGO_PKG_VERSION")
             });
 
             if let Err(e) = client.send(&register_msg.to_string()).await {
@@ -220,6 +224,55 @@ async fn handle_server_messages(
                                 &my_device_id,
                                 from_id,
                                 "image",
+                                success,
+                                Some(message_id.as_str()),
+                            )
+                            .await;
+                        }
+                        "CLIPBOARD_FILE" => {
+                            let saved_file = save_clipboard_file(payload);
+                            let success = saved_file.is_ok();
+
+                            if let Some(ref handle) = app_handle {
+                                if let Some(record) = build_history_record(
+                                    message_id.clone(),
+                                    from_id,
+                                    from_name,
+                                    payload,
+                                    "server",
+                                    delivery_mode,
+                                    received_at,
+                                ) {
+                                    emit_history_record(handle, record);
+                                }
+
+                                let file_payload = serde_json::json!({
+                                    "record_id": message_id,
+                                    "from_device_id": from_id,
+                                    "from_device_name": from_name,
+                                    "via": "server",
+                                    "timestamp": received_at,
+                                    "sent_at": payload.get("timestamp").and_then(|v| v.as_i64()).unwrap_or(received_at),
+                                    "delivery_mode": delivery_mode,
+                                    "saved_path": saved_file.as_ref().ok().map(|path| path.display().to_string())
+                                });
+                                handle.emit("file_received", &file_payload).unwrap_or(());
+                            }
+
+                            if let Ok(path) = &saved_file {
+                                if let Some(parent) = path.parent() {
+                                    if let Err(error) = open_folder(parent) {
+                                        eprintln!("failed to open received file folder: {}", error);
+                                    }
+                                }
+                            } else if let Err(error) = &saved_file {
+                                eprintln!("failed to save received file: {}", error);
+                            }
+
+                            send_relay_ack(
+                                &my_device_id,
+                                from_id,
+                                "file",
                                 success,
                                 Some(message_id.as_str()),
                             )
@@ -510,8 +563,126 @@ fn build_history_record(
                 metadata,
             })
         }
+        "CLIPBOARD_FILE" => {
+            let file_name = payload
+                .get("file_name")
+                .and_then(|v| v.as_str())
+                .unwrap_or("received-file");
+            let metadata = serde_json::json!({
+                "mime_type": payload.get("mime_type").and_then(|v| v.as_str()).unwrap_or(""),
+                "file_name": file_name,
+                "size": payload.get("size").and_then(|v| v.as_i64())
+            })
+            .to_string();
+            Some(NewHistoryRecord {
+                id,
+                from_device_id: from_device_id.to_string(),
+                from_device_name: from_device_name.to_string(),
+                content_type: "file".to_string(),
+                content: format!("[文件] {}", file_name),
+                sent_at,
+                received_at,
+                via: via.to_string(),
+                delivery_mode: delivery_mode.to_string(),
+                metadata: Some(metadata),
+            })
+        }
         _ => None,
     }
+}
+
+fn save_clipboard_file(payload: &serde_json::Value) -> Result<PathBuf, Box<dyn Error + Send + Sync>> {
+    let data = payload
+        .get("data")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "missing file data"))?;
+    let file_name = payload
+        .get("file_name")
+        .and_then(|v| v.as_str())
+        .unwrap_or("received-file");
+    let bytes = base64::engine::general_purpose::STANDARD.decode(data)?;
+
+    let target_dir = resolve_received_files_dir()?;
+    fs::create_dir_all(&target_dir)?;
+
+    let target_path = unique_path(&target_dir, &sanitize_file_name(file_name));
+    fs::write(&target_path, bytes)?;
+    Ok(target_path)
+}
+
+fn resolve_received_files_dir() -> Result<PathBuf, Box<dyn Error + Send + Sync>> {
+    let base = dirs::download_dir()
+        .or_else(dirs::document_dir)
+        .or_else(dirs::desktop_dir)
+        .or_else(|| std::env::current_dir().ok())
+        .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "cannot resolve user file directory"))?;
+    Ok(base.join("VoiceInput"))
+}
+
+fn sanitize_file_name(file_name: &str) -> String {
+    let sanitized = file_name
+        .chars()
+        .map(|ch| match ch {
+            '\\' | '/' | ':' | '*' | '?' | '"' | '<' | '>' | '|' => '_',
+            ch if ch.is_control() => '_',
+            ch => ch,
+        })
+        .collect::<String>()
+        .trim()
+        .trim_matches('.')
+        .to_string();
+
+    if sanitized.is_empty() {
+        "received-file".to_string()
+    } else {
+        sanitized
+    }
+}
+
+fn unique_path(dir: &Path, file_name: &str) -> PathBuf {
+    let mut candidate = dir.join(file_name);
+    if !candidate.exists() {
+        return candidate;
+    }
+
+    let path = Path::new(file_name);
+    let stem = path
+        .file_stem()
+        .and_then(|value| value.to_str())
+        .unwrap_or("received-file");
+    let extension = path.extension().and_then(|value| value.to_str());
+
+    for index in 1.. {
+        let next_name = match extension {
+            Some(extension) if !extension.is_empty() => format!("{}_{}.{}", stem, index, extension),
+            _ => format!("{}_{}", stem, index),
+        };
+        candidate = dir.join(next_name);
+        if !candidate.exists() {
+            return candidate;
+        }
+    }
+
+    unreachable!()
+}
+
+fn open_folder(path: &Path) -> Result<(), Box<dyn Error>> {
+    #[cfg(target_os = "windows")]
+    {
+        Command::new("explorer").arg(path).spawn()?;
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        Command::new("open").arg(path).spawn()?;
+    }
+
+    #[cfg(all(unix, not(target_os = "macos")))]
+    {
+        Command::new("xdg-open").arg(path).spawn()?;
+    }
+
+    Ok(())
 }
 
 fn emit_history_record(app_handle: &AppHandle, record: NewHistoryRecord) {

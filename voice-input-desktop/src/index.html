@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>语音输入助手</title>
+    <title>语传-手机转电脑语音输入助手</title>
     <link rel="stylesheet" href="styles.css">
 </head>
 <body>
@@ -11,7 +11,8 @@
         <!-- 顶部工具栏 -->
         <div class="toolbar">
             <div class="toolbar-left">
-                <span class="app-title">语音输入助手</span>
+                <span class="app-title">语传</span>
+                <span class="app-version" id="app-version">v--</span>
                 <div class="toolbar-divider"></div>
 
                 <!-- 服务器模式 -->
@@ -42,13 +43,18 @@
                     <span id="device-name" style="display:none;"></span>
                     <button id="unpair-btn" class="toolbar-btn unpair-btn" style="display:none;" title="取消配对">取消配对</button>
                 </div>
+                <div class="update-status" id="update-status">
+                    <button id="check-update-btn" class="toolbar-btn" title="手动检查更新">检查更新</button>
+                    <button id="install-update-btn" class="toolbar-btn" style="display:none;" title="下载安装新版本">下载更新</button>
+                    <span id="update-text"></span>
+                </div>
             </div>
         </div>
 
         <!-- 服务器地址编辑栏（默认隐藏） -->
         <div id="url-bar" class="url-bar" style="display:none;">
             <label>服务器地址:</label>
-            <input type="text" id="server-url" placeholder="wss://ha.wwszxc.tax:16908">
+            <input type="text" id="server-url" placeholder="wss://8.153.163.104:16908">
             <span class="url-hint">按回车连接</span>
         </div>
 

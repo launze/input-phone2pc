@@ -16,6 +16,7 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import com.voiceinput.ui.screens.HistoryScreen
 import com.voiceinput.ui.screens.InputScreen
+import com.voiceinput.ui.screens.FileQrScannerScreen
 import com.voiceinput.ui.screens.QrScannerScreen
 import com.voiceinput.ui.screens.SettingsScreen
 import com.voiceinput.ui.theme.VoiceInputTheme
@@ -48,6 +49,7 @@ fun MainScreen() {
                 viewModel = viewModel,
                 onNavigateToSettings = { navController.navigate("settings") },
                 onNavigateToScanner = { navController.navigate("scanner") },
+                onNavigateToFileScanner = { navController.navigate("file_scanner") },
                 onNavigateToHistory = { navController.navigate("history") }
             )
         }
@@ -71,6 +73,15 @@ fun MainScreen() {
                 onScanResult = { serverUrl, deviceId, deviceName, localIp, localPort ->
                     viewModel.handleQrScanResult(serverUrl, deviceId, deviceName, localIp, localPort)
                     navController.popBackStack()
+                },
+                onBack = { navController.popBackStack() }
+            )
+        }
+
+        composable("file_scanner") {
+            FileQrScannerScreen(
+                onFileScanned = { fileName, mimeType, base64Data, size ->
+                    viewModel.sendScannedFilePayload(fileName, mimeType, base64Data, size)
                 },
                 onBack = { navController.popBackStack() }
             )

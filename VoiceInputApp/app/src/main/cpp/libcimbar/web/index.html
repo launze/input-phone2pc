@@ -1,0 +1,570 @@
+<!doctype html>
+<html lang="zh-CN" data-framework="javascript">
+
+<head>
+  <title>赫墨拉 1.0</title>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, user-scalable=no">
+  <link rel="icon" href="favicon.ico" sizes="any">
+  <link rel="apple-touch-icon" href="icon-192x192.png">
+  <link rel="manifest" href="pwa.json">
+</head>
+
+<body>
+
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+    }
+
+    html,
+    body {
+      height: 100vh;
+    }
+
+    body {
+      background-color: white;
+      background-image: linear-gradient(135deg, rgb(0, 0, 0) 65px, transparent 130px),
+        repeating-linear-gradient(135deg, rgb(0, 0, 0) 0px, rgb(153, 197, 206) 1px, transparent 1px, transparent 30px),
+        repeating-linear-gradient(45deg, rgb(0, 0, 0) 0px, rgb(153, 197, 206) 1px, transparent 1px, transparent 30px);
+      background-size: cover;
+      color: gray;
+      display: grid;
+      align-items: center;
+      transition: opacity 0.4s ease-in;
+    }
+
+    #status {
+      position: fixed;
+      right: 0;
+      top: 0;
+    }
+
+    #nav-container:focus-within {
+      z-index: 1;
+    }
+
+    #nav-content,
+    #nav-container .bg,
+    #nav-container:focus-within #nav-button {
+      z-index: 1;
+    }
+
+    #canvas {
+      display: block;
+      position: relative;
+    }
+
+    #dragdrop {
+      background-color: #3C3D82;
+      background-image: linear-gradient(135deg, rgba(249, 249, 249, 0.1) 0%, rgba(249, 249, 249, 0.1) 18%, rgba(70, 70, 70, 0.1) 18%, rgba(70, 70, 70, 0.1) 33%, rgba(229, 229, 229, 0.1) 33%, rgba(229, 229, 229, 0.1) 35%, rgba(53, 53, 53, 0.1) 35%, rgba(53, 53, 53, 0.1) 47%, rgba(156, 156, 156, 0.1) 47%, rgba(156, 156, 156, 0.1) 100%), linear-gradient(135deg, rgba(106, 106, 106, 0.08) 0%, rgba(106, 106, 106, 0.08) 9%, rgba(123, 123, 123, 0.08) 9%, rgba(123, 123, 123, 0.08) 10%, rgba(69, 69, 69, 0.08) 10%, rgba(69, 69, 69, 0.08) 38%, rgba(33, 33, 33, 0.08) 38%, rgba(33, 33, 33, 0.08) 65%, rgba(24, 24, 24, 0.08) 65%, rgba(24, 24, 24, 0.08) 77%, rgba(210, 210, 210, 0.08) 77%, rgba(210, 210, 210, 0.08) 100%), linear-gradient(45deg, rgba(70, 70, 70, 0.02) 0%, rgba(70, 70, 70, 0.02) 23%, rgba(225, 225, 225, 0.02) 23%, rgba(225, 225, 225, 0.02) 29%, rgba(118, 118, 118, 0.02) 29%, rgba(118, 118, 118, 0.02) 36%, rgba(28, 28, 28, 0.02) 36%, rgba(28, 28, 28, 0.02) 42%, rgba(142, 142, 142, 0.02) 42%, rgba(142, 142, 142, 0.02) 85%, rgba(95, 95, 95, 0.02) 85%, rgba(95, 95, 95, 0.02) 93%, rgba(32, 32, 32, 0.02) 93%, rgba(32, 32, 32, 0.02) 98%, rgba(71, 71, 71, 0.02) 98%, rgba(71, 71, 71, 0.02) 100%), linear-gradient(135deg, rgba(207, 207, 207, 0.05) 0%, rgba(207, 207, 207, 0.05) 12%, rgba(32, 32, 32, 0.05) 12%, rgba(32, 32, 32, 0.05) 27%, rgba(79, 79, 79, 0.05) 27%, rgba(79, 79, 79, 0.05) 32%, rgba(139, 139, 139, 0.05) 32%, rgba(139, 139, 139, 0.05) 43%, rgba(150, 150, 150, 0.05) 43%, rgba(150, 150, 150, 0.05) 79%, rgba(139, 139, 139, 0.05) 79%, rgba(139, 139, 139, 0.05) 87%, rgba(55, 55, 55, 0.05) 87%, rgba(55, 55, 55, 0.05) 91%, rgba(68, 68, 68, 0.05) 91%, rgba(68, 68, 68, 0.05) 100%), linear-gradient(0deg, rgba(108, 108, 108, 0.1) 0%, rgba(108, 108, 108, 0.1) 16%, rgba(163, 163, 163, 0.1) 16%, rgba(163, 163, 163, 0.1) 18%, rgba(32, 32, 32, 0.1) 18%, rgba(32, 32, 32, 0.1) 29%, rgba(122, 122, 122, 0.1) 29%, rgba(122, 122, 122, 0.1) 61%, rgba(141, 141, 141, 0.1) 61%, rgba(141, 141, 141, 0.1) 67%, rgba(53, 53, 53, 0.1) 67%, rgba(53, 53, 53, 0.1) 78%, rgba(142, 142, 142, 0.1) 78%, rgba(142, 142, 142, 0.1) 100%), linear-gradient(0deg, rgba(160, 160, 160, 0.08) 0%, rgba(160, 160, 160, 0.08) 27%, rgba(163, 163, 163, 0.08) 27%, rgba(163, 163, 163, 0.08) 29%, rgba(37, 37, 37, 0.08) 29%, rgba(37, 37, 37, 0.08) 35%, rgba(96, 96, 96, 0.08) 35%, rgba(96, 96, 96, 0.08) 73%, rgba(250, 250, 250, 0.08) 73%, rgba(250, 250, 250, 0.08) 90%, rgba(91, 91, 91, 0.08) 90%, rgba(91, 91, 91, 0.08) 100%), linear-gradient(90deg, rgba(191, 191, 191, 0.08) 0%, rgba(191, 191, 191, 0.08) 2%, rgba(170, 170, 170, 0.08) 2%, rgba(170, 170, 170, 0.08) 7%, rgba(49, 49, 49, 0.08) 7%, rgba(49, 49, 49, 0.08) 9%, rgba(131, 131, 131, 0.08) 9%, rgba(131, 131, 131, 0.08) 23%, rgba(197, 197, 197, 0.08) 23%, rgba(197, 197, 197, 0.08) 29%, rgba(154, 154, 154, 0.08) 29%, rgba(154, 154, 154, 0.08) 91%, rgba(211, 211, 211, 0.08) 91%, rgba(211, 211, 211, 0.08) 100%), linear-gradient(90deg, rgb(0, 119, 100), rgb(0, 0, 119));
+      margin: 0 auto;
+      color: #F0F0F0;
+      outline: 6px solid black;
+      box-shadow: 0px 0px 12px black, 0px 0px 18px black;
+    }
+
+    .dragdrop::before {
+      content: "⌜ Tap to start! ⌟";
+      font: 1.5em serif;
+      padding-top: 2em;
+      position: absolute;
+      left: 0;
+      text-align: center;
+      width: 100%;
+    }
+
+    .dragdrop.error:before {
+      content: "⌜ Error! WebGL is not enabled :( ⌟";
+    }
+
+    #invisible_click {
+      position: fixed;
+      opacity: 0;
+      pointer-events: auto;
+    }
+
+    #invisible_click.active {
+      cursor: none;
+    }
+
+    #nav-container:focus-within+#invisible_click {
+      pointer-events: none;
+      display: none;
+    }
+
+    /* options */
+    #nav-container a.mode-b,
+    #nav-container a.mode-bm,
+    #nav-container a.mode-bu,
+    #nav-container a.mode-4c {
+      color: #555;
+    }
+
+    #nav-container.mode-b a.mode-b,
+    #nav-container.mode-bm a.mode-bm,
+    #nav-container.mode-bu a.mode-bu,
+    #nav-container.mode-4c a.mode-4c {
+      color: #9fa6b2;
+    }
+
+    /* nav stuff */
+    /* built off of https://codepen.io/dannievinther/pen/NvZjvz */
+    #nav-container {
+      position: fixed;
+      top: 0;
+      width: 100%;
+      height: 100%;
+      pointer-events: none;
+    }
+
+    #nav-container .bg {
+      pointer-events: auto;
+      position: absolute;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      visibility: hidden;
+      opacity: 0;
+      transition: .3s;
+      background: black;
+    }
+
+    #nav-container:focus-within .bg {
+      visibility: visible;
+      opacity: .6;
+    }
+
+    #nav-container * {
+      visibility: visible;
+    }
+
+    #nav-button {
+      position: relative;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      height: 60px;
+      width: 30px;
+      margin-left: 15px;
+      cursor: pointer;
+      pointer-events: auto;
+      touch-action: manipulation;
+      border: 0;
+      outline: 0;
+      background-image: linear-gradient(180deg, rgb(0, 0, 0, 0) 10%, rgb(0, 0, 0) 40%, rgb(0, 0, 0) 60%, rgb(0, 0, 0, 0) 90%);
+      background-color: initial;
+    }
+
+    #nav-button.hide {
+      opacity: 0;
+      transition: .3s;
+    }
+
+    #nav-container:focus-within #nav-button.hide {
+      opacity: 1;
+    }
+
+    .icon-bar {
+      display: block;
+      width: 100%;
+      height: 3px;
+      transition: .3s;
+    }
+
+    .icon-bar+.icon-bar {
+      margin-top: 3px;
+    }
+
+    #nav-container .icon-bar:nth-of-type(1) {
+      background-color: #00ff00;
+      box-shadow: 0px 0px 5px #00ff00, 0px 0px 2px #00ff00;
+    }
+
+    #nav-container .icon-bar:nth-of-type(2) {
+      background-color: #ffff00;
+      box-shadow: 0px 0px 5px #ffff00, 0px 0px 2px #ffff00;
+    }
+
+    #nav-container .icon-bar:nth-of-type(3) {
+      background-color: #00ffff;
+      box-shadow: 0px 0px 5px #00ffff, 0px 0px 2px #00ffff;
+    }
+
+    #nav-container .icon-bar:nth-of-type(4) {
+      background-color: #ff00ff;
+      box-shadow: 0px 0px 5px #ff00ff, 0px 0px 2px #ff00ff;
+    }
+
+    #nav-container.mode-4c .icon-bar:nth-of-type(1) {
+      background-color: #00ffff;
+      box-shadow: 0px 0px 5px #00ffff, 0px 0px 2px #00ffff;
+    }
+
+    #nav-container.mode-4c .icon-bar:nth-of-type(2) {
+      background-color: #ffff00;
+      box-shadow: 0px 0px 5px #ffff00, 0px 0px 2px #ffff00;
+    }
+
+    #nav-container.mode-4c .icon-bar:nth-of-type(3) {
+      background-color: #00ff00;
+      box-shadow: 0px 0px 5px #00ff00, 0px 0px 2px #00ff00;
+    }
+
+    #nav-container.mode-4c .icon-bar:nth-of-type(4) {
+      background-color: #ff00ff;
+      box-shadow: 0px 0px 5px #ff00ff, 0px 0px 2px #ff00ff;
+    }
+
+    #nav-container:focus-within #nav-button {
+      pointer-events: none;
+    }
+
+    #nav-container:focus-within .icon-bar {
+      background-color: #aaa;
+      background-image: none !important;
+      box-shadow: none !important;
+    }
+
+    #nav-button.attention:focus-within .icon-bar {
+      background-color: #00ffff;
+    }
+
+    #nav-container:focus-within .icon-bar:nth-of-type(1) {
+      transform: translate3d(0, 9px, 0) rotate(45deg);
+    }
+
+    #nav-container:focus-within .icon-bar:nth-of-type(2),
+    #nav-container:focus-within .icon-bar:nth-of-type(3) {
+      opacity: 0;
+    }
+
+    #nav-container:focus-within .icon-bar:nth-of-type(4) {
+      transform: translate3d(0, -9px, 0) rotate(-45deg);
+    }
+
+    #nav-content {
+      margin-top: 60px;
+      padding: 20px;
+      position: absolute;
+      top: 0;
+      left: 0;
+      height: calc(100% - 60px);
+      overflow-x: clip;
+      background-color: #282C34;
+      text-align: center;
+      pointer-events: auto;
+      -webkit-tap-highlight-color: rgba(0, 0, 0, 0);
+      transform: translateX(-100%);
+      transition: transform .3s;
+    }
+
+    #nav-content ul {
+      height: calc(100% - 60px);
+      display: flex;
+      flex-direction: column;
+      list-style: none;
+    }
+
+    #nav-content hr {
+      border: 1px solid #444;
+    }
+
+    #nav-content li a {
+      display: block;
+      padding: 10px 5px;
+      color: #9fa6b2;
+      text-decoration: none;
+      transition: color .1s;
+    }
+
+    #nav-content li a.attention {
+      animation: glowing 1.5s infinite alternate;
+    }
+
+    #nav-content li a {
+      font-variant: small-caps;
+      font-size: 2em;
+    }
+
+    #nav-content h4 {
+      font-variant: small-caps;
+      padding-top: 1em;
+    }
+
+    #nav-content li.modesel a {
+      display: inline-block;
+      width: 2em;
+    }
+
+    #nav-content li:hover {
+      background-color: #2c323c;
+    }
+
+    #nav-content li:not(.small)+.small {
+      margin-top: auto;
+    }
+
+    #nav-content li.small {
+      display: flex;
+      align-self: center;
+    }
+
+    #nav-content li.small a {
+      font-size: 1em;
+    }
+
+    #nav-content li .range {
+      margin-top: 0.6em;
+      width: 100%;
+    }
+
+    #nav-container:focus-within #nav-content {
+      transform: none;
+    }
+
+    #nav-container.open #nav-content {
+      transform: none;
+    }
+
+    @keyframes glowing {
+      0% {
+        color: #00ffff;
+      }
+    }
+
+    body {
+      background: #f7efe5;
+      color: #3b2417;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    #dragdrop {
+      background-color: #fffaf4;
+      background-image:
+        linear-gradient(135deg, rgba(92, 57, 40, 0.10) 25%, transparent 25%),
+        linear-gradient(225deg, rgba(92, 57, 40, 0.10) 25%, transparent 25%),
+        linear-gradient(45deg, rgba(92, 57, 40, 0.08) 25%, transparent 25%),
+        linear-gradient(315deg, rgba(92, 57, 40, 0.08) 25%, #fffaf4 25%);
+      background-position: 16px 0, 16px 0, 0 0, 0 0;
+      background-size: 32px 32px;
+      outline: 6px solid #3b2417;
+      box-shadow: 0 0 0 1px #d7bca3, 0 10px 28px rgba(59, 36, 23, 0.28);
+      color: #5b3928;
+    }
+
+    .dragdrop::before {
+      content: "选择文件";
+      color: #5b3928;
+      font: 700 1.5em system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    .dragdrop.error:before {
+      content: "WebGL 不可用";
+    }
+
+    #nav-button {
+      background: #5b3928;
+      border-radius: 0 0 10px 0;
+    }
+
+    #nav-button .icon-bar {
+      background-color: #fff7ee;
+    }
+
+    #nav-content {
+      width: 260px;
+      background: #2f1d14;
+      color: #fff7ee;
+      text-align: left;
+      box-shadow: 8px 0 24px rgba(47, 29, 20, 0.24);
+      height: 100dvh;
+      max-height: 100dvh;
+      box-sizing: border-box;
+      overflow-x: hidden;
+      overflow-y: auto;
+      overscroll-behavior: contain;
+      touch-action: pan-y;
+      -webkit-overflow-scrolling: touch;
+    }
+
+    #nav-content ul {
+      gap: 12px;
+      padding-bottom: calc(24px + env(safe-area-inset-bottom));
+    }
+
+    #nav-content li {
+      background: rgba(255, 250, 244, 0.08);
+      border: 1px solid rgba(215, 188, 163, 0.22);
+      border-radius: 8px;
+      padding: 12px;
+    }
+
+    #nav-content li:hover {
+      background: rgba(255, 250, 244, 0.12);
+    }
+
+    #nav-content li a,
+    #nav-content li a.attention {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 42px;
+      padding: 0 12px;
+      border-radius: 6px;
+      background: #7a4c35;
+      color: #fffaf4;
+      font-variant: normal;
+      font-weight: 700;
+      text-decoration: none;
+      animation: none;
+    }
+
+    #nav-content h4 {
+      margin-bottom: 8px;
+      color: #d7bca3;
+      font-size: 13px;
+      font-variant: normal;
+      text-align: left;
+    }
+
+    #nav-content li .range {
+      accent-color: #8c5a3f;
+    }
+
+    .brand {
+      display: grid;
+      grid-template-columns: 48px 1fr auto;
+      gap: 12px;
+      align-items: center;
+      margin-bottom: 18px;
+    }
+
+    .drawer-close {
+      width: 38px;
+      height: 38px;
+      border: 0;
+      border-radius: 7px;
+      background: #5b3928;
+      color: #fff7ee;
+      font-size: 24px;
+      line-height: 1;
+    }
+
+    .brand img {
+      width: 48px;
+      height: 48px;
+      border-radius: 10px;
+      background: #fffaf4;
+    }
+
+    .brand strong {
+      display: block;
+      font-size: 20px;
+      line-height: 1.1;
+    }
+
+    .brand span {
+      display: block;
+      margin-top: 4px;
+      color: #c9aa91;
+      font-size: 12px;
+    }
+
+    #current-file {
+      display: block;
+      margin-bottom: 14px;
+      color: #c9aa91;
+      font-size: 13px;
+      overflow-wrap: anywhere;
+    }
+
+    #fps-value {
+      color: #fff7ee;
+      font-size: 22px;
+      font-weight: 700;
+    }
+
+    .fps-presets {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 8px;
+      margin-top: 10px;
+    }
+
+    .fps-presets a {
+      min-height: 34px !important;
+      padding: 0 !important;
+      background: #5b3928 !important;
+      font-size: 13px !important;
+    }
+  </style>
+
+  <div id="status"></div>
+  <div id="dragdrop" class="dragdrop" title="拖入文件或点击选择文件">
+    <canvas id="canvas" class="canvas"></canvas>
+  </div>
+
+  <input style="display:none;" type="file" name="file_input" id="file_input" onchange="Main.fileInput(this);" />
+
+  <a id="invisible_click" href="javascript:;" onclick="Main.clickNav()"></a>
+
+  <div id="nav-container" class="mode-b">
+    <div class="bg" onclick="Main.blurNav();"></div>
+    <button id="nav-button" tabindex="0" onclick="Main.clickNav();">
+      <span class="icon-bar"></span>
+      <span class="icon-bar"></span>
+      <span class="icon-bar"></span>
+      <span class="icon-bar"></span>
+    </button>
+    <div id="nav-content" tabindex="-1">
+      <div class="brand">
+        <img src="icon-192x192.png" alt="">
+        <div>
+          <strong>赫墨拉 1.0</strong>
+        </div>
+        <button class="drawer-close" type="button" onclick="Main.blurNav();" aria-label="收起设置">×</button>
+      </div>
+      <span id="current-file">未选择文件</span>
+      <ul>
+        <li><a class="attention" id="nav-find-file-link" href="javascript:void(0)" onclick="Main.clickFileInput()">选择文件</a></li>
+        <li>
+          <h4>帧率</h4>
+          <div id="fps-value">45 fps</div>
+          <div class="fps-presets">
+            <a href="javascript:void(0)" onclick="Main.setFPS(15)">15</a>
+            <a href="javascript:void(0)" onclick="Main.setFPS(20)">20</a>
+            <a href="javascript:void(0)" onclick="Main.setFPS(25)">25</a>
+            <a href="javascript:void(0)" onclick="Main.setFPS(30)">30</a>
+            <a href="javascript:void(0)" onclick="Main.setFPS(40)">40</a>
+            <a href="javascript:void(0)" onclick="Main.setFPS(50)">50</a>
+            <a href="javascript:void(0)" onclick="Main.setFPS(60)">60</a>
+          </div>
+          <input id="fps-slider" type="range" class="range" min="5" max="60" step="1" value="45" oninput="Main.setFPS(this.value)"
+            onchange="Main.setFPS(this.value)" />
+        </li>
+      </ul>
+    </div>
+  </div>
+
+  <script type="text/javascript">
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('./sw.js');
+    }
+    var canvas = document.getElementById('canvas');
+
+    var Module = {};
+    Module.canvas = canvas;
+    Module.onRuntimeInitialized = () => {
+      Main.init(canvas);
+      Main.nextFrame();
+    };
+  </script>
+
+  <script src="cimbar_js.js"></script>
+  <script src="main.js"></script>
+
+</body>
+
+</html>

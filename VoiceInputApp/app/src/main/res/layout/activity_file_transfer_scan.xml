@@ -1,0 +1,102 @@
+<?xml version="1.0" encoding="utf-8"?>
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="#000000">
+
+    <com.voiceinput.cimbar.OpencvCameraView
+        android:id="@+id/file_scan_camera1"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent" />
+
+    <com.voiceinput.cimbar.OpencvCamera2View
+        android:id="@+id/file_scan_camera2"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:visibility="gone" />
+
+    <LinearLayout
+        android:id="@+id/file_scan_top_bar"
+        android:layout_width="match_parent"
+        android:layout_height="56dp"
+        android:layout_gravity="top"
+        android:background="#99000000"
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:paddingStart="8dp"
+        android:paddingEnd="12dp">
+
+        <Button
+            android:id="@+id/file_scan_back"
+            android:layout_width="48dp"
+            android:layout_height="40dp"
+            android:background="#00000000"
+            android:text="&lt;"
+            android:textColor="#FFFFFFFF"
+            android:textSize="24sp" />
+
+        <TextView
+            android:id="@+id/file_scan_title"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="扫码接收文件"
+            android:textColor="#FFFFFFFF"
+            android:textSize="18sp"
+            android:textStyle="bold" />
+
+        <Button
+            android:id="@+id/file_scan_camera_api"
+            android:layout_width="54dp"
+            android:layout_height="36dp"
+            android:background="#66444444"
+            android:padding="0dp"
+            android:text="C2"
+            android:textAllCaps="false"
+            android:textColor="#FFFFFFFF"
+            android:textSize="13sp" />
+    </LinearLayout>
+
+    <LinearLayout
+        android:id="@+id/file_scan_status_panel"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_gravity="bottom"
+        android:layout_marginStart="16dp"
+        android:layout_marginEnd="16dp"
+        android:layout_marginBottom="18dp"
+        android:background="#B0000000"
+        android:orientation="vertical"
+        android:padding="14dp">
+
+        <TextView
+            android:id="@+id/file_scan_status"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="对准电脑屏幕上的文件传输图像"
+            android:textColor="#FFFFFFFF"
+            android:textSize="15sp"
+            android:textStyle="bold" />
+
+        <ProgressBar
+            android:id="@+id/file_scan_progress"
+            style="?android:attr/progressBarStyleHorizontal"
+            android:layout_width="match_parent"
+            android:layout_height="8dp"
+            android:layout_marginTop="10dp"
+            android:max="100"
+            android:progress="0"
+            android:progressDrawable="@drawable/progress_transfer" />
+
+        <TextView
+            android:id="@+id/file_scan_stats"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:fontFamily="monospace"
+            android:maxLines="3"
+            android:text="等待接收..."
+            android:textColor="#FFE6E6E6"
+            android:textSize="11sp" />
+    </LinearLayout>
+</FrameLayout>

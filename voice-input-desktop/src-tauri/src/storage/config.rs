@@ -2,8 +2,11 @@ use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
 
-const DEFAULT_SERVER_URL: &str = "wss://ha.wwszxc.tax:16908";
-const LEGACY_SERVER_URL: &str = "wss://nas.smarthome2020.top:7070";
+const DEFAULT_SERVER_URL: &str = "wss://8.153.163.104:16908";
+const LEGACY_SERVER_URLS: &[&str] = &[
+    "wss://nas.smarthome2020.top:7070",
+    "wss://ha.wwszxc.tax:16908",
+];
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
@@ -138,7 +141,7 @@ impl AppConfig {
 }
 
 fn migrate_server_url(config: &mut AppConfig) -> bool {
-    if config.server_url == LEGACY_SERVER_URL {
+    if LEGACY_SERVER_URLS.contains(&config.server_url.as_str()) {
         config.server_url = DEFAULT_SERVER_URL.to_string();
         return true;
     }

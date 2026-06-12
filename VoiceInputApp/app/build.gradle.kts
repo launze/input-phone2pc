@@ -6,17 +6,32 @@ plugins {
 android {
     namespace = "com.voiceinput"
     compileSdk = 34
+    ndkVersion = "27.1.12297006"
 
     defaultConfig {
         applicationId = "com.voiceinput"
         minSdk = 24
         targetSdk = 34
-        versionCode = 2
-        versionName = "1.2.0"
+        versionCode = 7
+        versionName = "1.2.5"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
             useSupportLibrary = true
+        }
+        ndk {
+            abiFilters += listOf("arm64-v8a")
+        }
+        externalNativeBuild {
+            cmake {
+                cppFlags += listOf("-frtti", "-fexceptions", "-std=c++17", "-O3", "-DNDEBUG")
+                val opencvSdk = providers.environmentVariable("OPENCV_SDK")
+                    .orElse(providers.gradleProperty("opencvsdk"))
+                    .get()
+                    .replace('\\', '/')
+                    .trimEnd('/')
+                arguments += listOf("-DOpenCV_DIR=$opencvSdk/sdk/native")
+            }
         }
     }
 
@@ -53,6 +68,7 @@ android {
     }
     buildFeatures {
         compose = true
+        buildConfig = true
     }
     composeOptions {
         kotlinCompilerExtensionVersion = "1.5.4"
@@ -60,6 +76,12 @@ android {
     packagingOptions {
         resources {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
+        }
+    }
+    externalNativeBuild {
+        cmake {
+            path = file("src/main/cpp/CMakeLists.txt")
+            version = "3.16.3+"
         }
     }
 }
@@ -89,6 +111,9 @@ dependencies {
 
     // ZXing for QR code scanning
     implementation("com.journeyapps:zxing-android-embedded:4.3.0")
+
+    // OpenCV camera and native decode support for hemera/cimbar file transfer scanning
+    implementation(project(":opencv"))
     
     testImplementation("junit:junit:4.13.2")
     androidTestImplementation("androidx.test.ext:junit:1.1.5")

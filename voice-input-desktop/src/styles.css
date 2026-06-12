@@ -46,6 +46,12 @@ body {
     white-space: nowrap;
 }
 
+.app-version {
+    font-size: 11px;
+    color: rgba(255,255,255,0.74);
+    white-space: nowrap;
+}
+
 .toolbar-divider {
     width: 1px;
     height: 20px;
@@ -122,6 +128,22 @@ body {
     background: rgba(255,255,255,0.15);
     border-radius: 16px;
     font-size: 12px;
+}
+
+.update-status {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+    font-size: 12px;
+    color: rgba(255,255,255,0.82);
+}
+
+.update-status #update-text {
+    max-width: 260px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
 .status-indicator {

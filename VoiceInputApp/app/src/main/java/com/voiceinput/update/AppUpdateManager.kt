@@ -68,7 +68,7 @@ class AppUpdateManager(private val context: Context) {
 
     private fun normalizeBase(serverUrl: String): String {
         val normalized = when {
-            serverUrl.startsWith("wss://") -> "https://" + serverUrl.removePrefix("wss://").trimEnd('/')
+            serverUrl.startsWith("wss://") -> "http://" + serverUrl.removePrefix("wss://").trimEnd('/')
             serverUrl.startsWith("ws://") -> "http://" + serverUrl.removePrefix("ws://").trimEnd('/')
             else -> serverUrl.trimEnd('/')
         }
@@ -77,6 +77,7 @@ class AppUpdateManager(private val context: Context) {
         val host = uri.host ?: error("missing host")
         val nextPort = when (val port = uri.port) {
             7070 -> 7071
+            16908 -> 16909
             -1 -> 7071
             else -> port
         }

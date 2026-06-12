@@ -30,7 +30,7 @@ fn current_version() -> String {
 
 fn normalize_server_base(server_url: &str) -> Result<String> {
     let normalized = if let Some(rest) = server_url.strip_prefix("wss://") {
-        format!("https://{}", rest.trim_end_matches('/'))
+        format!("http://{}", rest.trim_end_matches('/'))
     } else if let Some(rest) = server_url.strip_prefix("ws://") {
         format!("http://{}", rest.trim_end_matches('/'))
     } else if server_url.starts_with("https://") || server_url.starts_with("http://") {
@@ -42,6 +42,7 @@ fn normalize_server_base(server_url: &str) -> Result<String> {
     let mut url = Url::parse(&normalized)?;
     let next_port = match url.port_or_known_default() {
         Some(7070) => 7071,
+        Some(16908) => 16909,
         Some(port) => port,
         _ => 7071,
     };

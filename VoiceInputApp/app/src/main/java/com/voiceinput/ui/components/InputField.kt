@@ -11,9 +11,11 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.AttachFile
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.PhotoCamera
 import androidx.compose.material.icons.filled.KeyboardReturn
+import androidx.compose.material.icons.filled.QrCodeScanner
 import androidx.compose.material3.Button
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -33,6 +35,8 @@ fun InputField(
     onSend: () -> Unit,
     onSendWithEnter: () -> Unit,
     onPickImage: () -> Unit,
+    onPickFile: () -> Unit,
+    onScanFile: () -> Unit,
     onTakePhoto: () -> Unit,
     enabled: Boolean = true,
     modifier: Modifier = Modifier
@@ -110,6 +114,26 @@ fun InputField(
                 Icon(
                     Icons.Default.Image,
                     contentDescription = "\u9009\u62e9\u56fe\u7247"
+                )
+            }
+
+            IconButton(
+                onClick = onPickFile,
+                enabled = enabled
+            ) {
+                Icon(
+                    Icons.Default.AttachFile,
+                    contentDescription = "选择文件"
+                )
+            }
+
+            IconButton(
+                onClick = onScanFile,
+                enabled = enabled
+            ) {
+                Icon(
+                    Icons.Default.QrCodeScanner,
+                    contentDescription = "扫码接收文件"
                 )
             }
 
