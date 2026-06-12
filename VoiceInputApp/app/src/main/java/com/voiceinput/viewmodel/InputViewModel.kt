@@ -1394,7 +1394,7 @@ class InputViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private fun buildConnectionName(deviceName: String): String {
-        return "$deviceName (服务器中转)"
+        return deviceName
     }
 
     private fun syncSelectedRelayDeviceStatus() {

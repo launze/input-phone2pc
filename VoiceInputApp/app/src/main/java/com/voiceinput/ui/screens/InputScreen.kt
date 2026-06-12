@@ -250,7 +250,7 @@ fun InputScreen(
             TopAppBar(
                 title = {
                     Column {
-                        Text("语音输入助手")
+                        Text("语传")
                         ConnectionStatusIndicator(
                             connected = connectionStatus.connected,
                             deviceName = connectionStatus.deviceName
