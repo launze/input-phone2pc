@@ -12,55 +12,55 @@
         {
           "platform": "android",
           "mime_type": "application/vnd.android.package-archive",
-          "sha256": "0a437dcd20277eba9525b3ee4db946d06b78d69d1c659b305ac4e5a0f892a5da",
-          "size": 34976034,
+          "sha256": "0221fb1b47a20cba8ec5a4636470c96bc7bc2761c185af1918ef2251bf1656b7",
+          "size": 34986710,
           "file_name": "voiceinput-android-v1.2.5.apk",
           "arch": "universal"
         },
         {
           "platform": "linux",
           "mime_type": "application/octet-stream",
-          "sha256": "4693a58de6ef4215631b26069a9684c0c64149b68a8daf0ecd6a803beb514afb",
-          "size": 86391288,
+          "sha256": "abf1c1def96722e9d2719f0882114149f058bf6c118ad82d81ec4334f827f9e3",
+          "size": 86383096,
           "file_name": "voiceinput-desktop-linux-x64-v1.2.5.AppImage",
           "arch": "x64"
         },
         {
           "platform": "linux",
           "mime_type": "application/vnd.debian.binary-package",
-          "sha256": "283214bd3a94197ca018ee89c918ddf51c0fee064f94e3d9f91c3116fd2b0a72",
-          "size": 9254848,
+          "sha256": "e0db61fdd1f7797f10fb9485573bda2d2ede2ff4668d4375bace80c8366f4eed",
+          "size": 9255982,
           "file_name": "voiceinput-desktop-linux-x64-v1.2.5.deb",
           "arch": "x64"
         },
         {
           "platform": "macos",
           "mime_type": "application/x-apple-diskimage",
-          "sha256": "a8b13b6773b08e766b57dc7467e6eb9f87134461188d5ef68a4a9ea099109f3b",
-          "size": 8962469,
+          "sha256": "010f866b76ce4454c416bcfd2f5208ce19a851595c9d1a97abfe53cb29d2dd72",
+          "size": 8962808,
           "file_name": "voiceinput-desktop-macos-arm64-v1.2.5.dmg",
           "arch": "arm64"
         },
         {
           "platform": "windows",
           "mime_type": "application/vnd.microsoft.portable-executable",
-          "sha256": "acd9c52dd65864846230ee36333dfee71a5e515a9deb3fd016228f89977881bf",
-          "size": 6082146,
+          "sha256": "4ca2f6b68b0753f239448866da19050c42dbd8b8bc147c43e09cf9a1a90420c4",
+          "size": 6085385,
           "file_name": "voiceinput-desktop-windows-x64-v1.2.5-setup.exe",
           "arch": "x64"
         },
         {
           "platform": "windows",
           "mime_type": "application/x-msi",
-          "sha256": "2af5774ee69a852f6b5907ad30a13907a74a02eda72abbb78ffb3d0af311bb18",
-          "size": 9023488,
+          "sha256": "4caaa95100603996a793591215a905805ce55291e78ee53ffcc8e7769b1020d5",
+          "size": 9027584,
           "file_name": "voiceinput-desktop-windows-x64-v1.2.5.msi",
           "arch": "x64"
         },
         {
           "platform": "tool",
           "mime_type": "application/zip",
-          "sha256": "90d02ebc7fb276e09de4bafa97c5cfe669d2c6b3255a8baf1c4bf69e59c7d386",
+          "sha256": "c90063513119aaa33c592710142f6dc00fa35fbff6a30af52738230e1f9e7ffd",
           "size": 664000,
           "file_name": "voiceinput-file-qr-generator-v1.2.5.zip",
           "arch": "universal"
