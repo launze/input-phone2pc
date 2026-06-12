@@ -139,10 +139,6 @@ jobs:
             rust_target: 'x86_64-pc-windows-msvc'
           - platform: 'macos-latest'
             os: 'macos'
-            arch: 'x64'
-            rust_target: 'x86_64-apple-darwin'
-          - platform: 'macos-latest'
-            os: 'macos'
             arch: 'arm64'
             rust_target: 'aarch64-apple-darwin'
           - platform: 'ubuntu-22.04'
@@ -313,8 +309,6 @@ jobs:
 
           - 手机端显示真实版本号，支持手动检查更新、下载并安装新 APK。
           - 电脑端显示真实版本号，支持手动检查更新、下载并打开安装包。
-          - 下载页面改为“语传-手机转电脑语音输入助手”，补充手机端和电脑端功能介绍。
-          - 下载页面新增文件二维码生成工具，用于在电脑端选择文件并生成文件二维码。
           - 扫码传输文件修复竖屏摄像头方向、OpenCV 初始化和连续解码问题。
           - 历史记录进入页面或内容更新后自动滚动到最新记录。
           - 图标更新为扁平简约风格。

@@ -5,15 +5,63 @@
   "releases": [
     {
       "version": "1.2.5",
-      "release_notes": "## 语传 1.2.5\n\n- 手机端显示真实版本号，支持手动检查更新、下载并安装新 APK。\n- 电脑端显示真实版本号，支持手动检查更新、下载并打开安装包。\n- 下载页面改为“语传-手机转电脑语音输入助手”，补充手机端和电脑端功能介绍。\n- 下载页面新增文件二维码生成工具，用于在电脑端选择文件并生成文件二维码。\n- 扫码传输文件修复竖屏摄像头方向、OpenCV 初始化和连续解码问题。\n- 历史记录进入页面或内容更新后自动滚动到最新记录。\n- 图标更新为扁平简约风格。",
+      "release_notes": "## 语传 1.2.5\n\n- 手机端显示真实版本号，支持手动检查更新、下载并安装新 APK。\n- 电脑端显示真实版本号，支持手动检查更新、下载并打开安装包。\n- 扫码传输文件修复竖屏摄像头方向、OpenCV 初始化和连续解码问题。\n- 历史记录进入页面或内容更新后自动滚动到最新记录。\n- 图标更新为扁平简约风格。",
       "published_at": "2026-06-12T00:00:00Z",
       "force_update": false,
       "assets": [
         {
+          "platform": "android",
+          "mime_type": "application/vnd.android.package-archive",
+          "sha256": "0a437dcd20277eba9525b3ee4db946d06b78d69d1c659b305ac4e5a0f892a5da",
+          "size": 34976034,
+          "file_name": "voiceinput-android-v1.2.5.apk",
+          "arch": "universal"
+        },
+        {
+          "platform": "linux",
+          "mime_type": "application/octet-stream",
+          "sha256": "4693a58de6ef4215631b26069a9684c0c64149b68a8daf0ecd6a803beb514afb",
+          "size": 86391288,
+          "file_name": "voiceinput-desktop-linux-x64-v1.2.5.AppImage",
+          "arch": "x64"
+        },
+        {
+          "platform": "linux",
+          "mime_type": "application/vnd.debian.binary-package",
+          "sha256": "283214bd3a94197ca018ee89c918ddf51c0fee064f94e3d9f91c3116fd2b0a72",
+          "size": 9254848,
+          "file_name": "voiceinput-desktop-linux-x64-v1.2.5.deb",
+          "arch": "x64"
+        },
+        {
+          "platform": "macos",
+          "mime_type": "application/x-apple-diskimage",
+          "sha256": "a8b13b6773b08e766b57dc7467e6eb9f87134461188d5ef68a4a9ea099109f3b",
+          "size": 8962469,
+          "file_name": "voiceinput-desktop-macos-arm64-v1.2.5.dmg",
+          "arch": "arm64"
+        },
+        {
+          "platform": "windows",
+          "mime_type": "application/vnd.microsoft.portable-executable",
+          "sha256": "acd9c52dd65864846230ee36333dfee71a5e515a9deb3fd016228f89977881bf",
+          "size": 6082146,
+          "file_name": "voiceinput-desktop-windows-x64-v1.2.5-setup.exe",
+          "arch": "x64"
+        },
+        {
+          "platform": "windows",
+          "mime_type": "application/x-msi",
+          "sha256": "2af5774ee69a852f6b5907ad30a13907a74a02eda72abbb78ffb3d0af311bb18",
+          "size": 9023488,
+          "file_name": "voiceinput-desktop-windows-x64-v1.2.5.msi",
+          "arch": "x64"
+        },
+        {
           "platform": "tool",
           "mime_type": "application/zip",
-          "sha256": "72c0821f30574594ab95e4be6884b34425f3b17f86b2e9ab1263c1add7cd16e9",
-          "size": 667439,
+          "sha256": "90d02ebc7fb276e09de4bafa97c5cfe669d2c6b3255a8baf1c4bf69e59c7d386",
+          "size": 664000,
           "file_name": "voiceinput-file-qr-generator-v1.2.5.zip",
           "arch": "universal"
         }
