@@ -1422,6 +1422,17 @@ document.addEventListener('DOMContentLoaded', async () => {
         const copyButtonLabel = record.content_type === 'image' ? '复制图片' : '复制';
         const deleteButton = `<button class="history-action-btn danger" data-action="delete" data-record-id="${escapeHtml(record.id)}">删除</button>`;
 
+        // 文件记录：打开文件、打开目录
+        const fileButtons = record.content_type === 'file'
+            ? `<button class="history-action-btn" data-action="open-file" data-record-id="${escapeHtml(record.id)}">打开文件</button>` +
+              `<button class="history-action-btn" data-action="open-folder" data-record-id="${escapeHtml(record.id)}">打开目录</button>`
+            : '';
+
+        // 图片记录：另存为
+        const imageSaveButton = record.content_type === 'image'
+            ? `<button class="history-action-btn" data-action="save-image" data-record-id="${escapeHtml(record.id)}">另存为</button>`
+            : '';
+
         return `
             <div class="${itemClass}" data-record-id="${escapeHtml(record.id)}">
                 <div class="history-item-header">
@@ -1429,6 +1440,8 @@ document.addEventListener('DOMContentLoaded', async () => {
                     <div class="history-item-actions">
                         <button class="history-action-btn" data-action="copy" data-record-id="${escapeHtml(record.id)}">${copyButtonLabel}</button>
                         ${editButton}
+                        ${fileButtons}
+                        ${imageSaveButton}
                         ${deleteButton}
                     </div>
                 </div>
@@ -1487,6 +1500,45 @@ document.addEventListener('DOMContentLoaded', async () => {
 
         if (action === 'edit') {
             startEditingHistoryRecord(recordId);
+            return;
+        }
+
+        if (action === 'open-file') {
+            try {
+                await invoke('open_history_record_file', { id: recordId });
+                setDesktopTextStatus('已打开文件。', 'success');
+            } catch (error) {
+                console.error('打开文件失败:', error);
+                const message = typeof error === 'string' ? error : error?.message || '打开文件失败';
+                setDesktopTextStatus(message, 'error');
+                alert(message);
+            }
+            return;
+        }
+
+        if (action === 'open-folder') {
+            try {
+                await invoke('open_history_record_folder', { id: recordId });
+                setDesktopTextStatus('已打开目录。', 'success');
+            } catch (error) {
+                console.error('打开目录失败:', error);
+                const message = typeof error === 'string' ? error : error?.message || '打开目录失败';
+                setDesktopTextStatus(message, 'error');
+                alert(message);
+            }
+            return;
+        }
+
+        if (action === 'save-image') {
+            try {
+                const savedPath = await invoke('save_history_image_as', { id: recordId });
+                setDesktopTextStatus(`图片已保存：${savedPath}`, 'success');
+            } catch (error) {
+                console.error('保存图片失败:', error);
+                const message = typeof error === 'string' ? error : error?.message || '保存图片失败';
+                setDesktopTextStatus(message, 'error');
+                alert(message);
+            }
             return;
         }
 

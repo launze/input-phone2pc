@@ -17,7 +17,7 @@ pub struct HistoryRecord {
     pub received_at: i64,
     pub via: String,
     pub delivery_mode: String,
-    #[serde(skip_serializing, default)]
+    #[serde(default)]
     pub metadata: Option<String>,
 }
 

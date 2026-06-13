@@ -269,6 +269,126 @@ fn copy_message_history_image_record(id: String) -> Result<(), String> {
 }
 
 #[tauri::command]
+fn open_history_record_file(id: String) -> Result<(), String> {
+    let record = history::get_record(&id)
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| "记录不存在".to_string())?;
+
+    if record.content_type != "file" {
+        return Err("这条记录不是文件记录".to_string());
+    }
+
+    let metadata: serde_json::Value = record
+        .metadata
+        .as_deref()
+        .ok_or_else(|| "文件记录没有元数据".to_string())?
+        .parse()
+        .map_err(|_| "文件记录元数据解析失败".to_string())?;
+
+    let saved_path = metadata
+        .get("saved_path")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| "该文件未保存或路径缺失".to_string())?;
+
+    if !std::path::Path::new(saved_path).exists() {
+        return Err(format!("文件不存在：{}", saved_path));
+    }
+
+    open::that(saved_path).map_err(|e| format!("打开文件失败: {}", e))
+}
+
+#[tauri::command]
+fn open_history_record_folder(id: String) -> Result<(), String> {
+    let record = history::get_record(&id)
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| "记录不存在".to_string())?;
+
+    if record.content_type != "file" {
+        return Err("这条记录不是文件记录".to_string());
+    }
+
+    let metadata: serde_json::Value = record
+        .metadata
+        .as_deref()
+        .ok_or_else(|| "文件记录没有元数据".to_string())?
+        .parse()
+        .map_err(|_| "文件记录元数据解析失败".to_string())?;
+
+    let saved_path = metadata
+        .get("saved_path")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| "该文件未保存或路径缺失".to_string())?;
+
+    let path = std::path::Path::new(saved_path);
+    let folder = if path.is_dir() {
+        path.to_path_buf()
+    } else {
+        path.parent()
+            .map(|p| p.to_path_buf())
+            .ok_or_else(|| "无法确定文件所在目录".to_string())?
+    };
+
+    if !folder.exists() {
+        return Err(format!("目录不存在：{}", folder.display()));
+    }
+
+    open::that(&folder).map_err(|e| format!("打开目录失败: {}", e))
+}
+
+#[tauri::command]
+fn save_history_image_as(id: String) -> Result<String, String> {
+    use base64::Engine;
+
+    let record = history::get_record(&id)
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| "记录不存在".to_string())?;
+
+    if record.content_type != "image" {
+        return Err("这条记录不是图片记录".to_string());
+    }
+
+    let metadata: serde_json::Value = record
+        .metadata
+        .as_deref()
+        .ok_or_else(|| "图片记录没有元数据".to_string())?
+        .parse()
+        .map_err(|_| "图片记录元数据解析失败".to_string())?;
+
+    let image_data = metadata
+        .get("data")
+        .or_else(|| metadata.get("image_data"))
+        .and_then(|v| v.as_str())
+        .filter(|v| !v.is_empty())
+        .ok_or_else(|| "图片记录没有保存图片数据".to_string())?;
+
+    let file_name = metadata
+        .get("file_name")
+        .and_then(|v| v.as_str())
+        .unwrap_or("clipboard-image.png");
+
+    let image_bytes = base64::engine::general_purpose::STANDARD
+        .decode(image_data)
+        .map_err(|_| "图片数据解码失败".to_string())?;
+
+    // 保存到用户下载目录
+    let target_dir = dirs::download_dir()
+        .or_else(dirs::document_dir)
+        .or_else(dirs::desktop_dir)
+        .unwrap_or_else(|| PathBuf::from("."));
+    fs::create_dir_all(&target_dir).map_err(|e| e.to_string())?;
+
+    let target_path = target_dir.join(file_name);
+    fs::write(&target_path, &image_bytes).map_err(|e| e.to_string())?;
+
+    // 打开所在文件夹
+    if let Some(parent) = target_path.parent() {
+        let _ = open::that(parent);
+    }
+
+    Ok(target_path.display().to_string())
+}
+
+#[tauri::command]
 fn export_message_history(
     start_at: Option<i64>,
     end_at: Option<i64>,
@@ -502,6 +622,9 @@ pub fn run() {
             update_message_history_record,
             delete_message_history_record,
             copy_message_history_image_record,
+            open_history_record_file,
+            open_history_record_folder,
+            save_history_image_as,
             export_message_history,
             insert_text_to_cursor,
             export_openai_report_word,

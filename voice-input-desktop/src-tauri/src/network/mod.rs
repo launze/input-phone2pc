@@ -154,6 +154,7 @@ async fn handle_server_messages(
                                         "server",
                                         delivery_mode,
                                         received_at,
+                                        None,
                                     ) {
                                         emit_history_record(handle, record);
                                     }
@@ -204,6 +205,7 @@ async fn handle_server_messages(
                                     "server",
                                     delivery_mode,
                                     received_at,
+                                    None,
                                 ) {
                                     emit_history_record(handle, record);
                                 }
@@ -242,6 +244,7 @@ async fn handle_server_messages(
                                     "server",
                                     delivery_mode,
                                     received_at,
+                                    saved_file.as_ref().ok(),
                                 ) {
                                     emit_history_record(handle, record);
                                 }
@@ -508,6 +511,7 @@ fn build_history_record(
     via: &str,
     delivery_mode: &str,
     received_at: i64,
+    saved_path: Option<&PathBuf>,
 ) -> Option<NewHistoryRecord> {
     let payload_type = payload
         .get("type")
@@ -568,12 +572,18 @@ fn build_history_record(
                 .get("file_name")
                 .and_then(|v| v.as_str())
                 .unwrap_or("received-file");
-            let metadata = serde_json::json!({
+            let mut meta = serde_json::json!({
                 "mime_type": payload.get("mime_type").and_then(|v| v.as_str()).unwrap_or(""),
                 "file_name": file_name,
                 "size": payload.get("size").and_then(|v| v.as_i64())
-            })
-            .to_string();
+            });
+            if let Some(path) = saved_path {
+                meta.as_object_mut().unwrap().insert(
+                    "saved_path".to_string(),
+                    serde_json::Value::String(path.display().to_string()),
+                );
+            }
+            let metadata = meta.to_string();
             Some(NewHistoryRecord {
                 id,
                 from_device_id: from_device_id.to_string(),
