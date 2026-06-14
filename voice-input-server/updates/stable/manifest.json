@@ -6,31 +6,31 @@
     {
       "version": "1.2.8",
       "release_notes": "PC 端 AI 助手右侧增加工具调用、引用记录、导出文件 Tab；会话列表精简为名称和时间并加宽；移除底部历史加载区域。",
-      "published_at": "2026-06-14T09:19:24+08:00",
+      "published_at": "2026-06-14T11:03:59+08:00",
       "force_update": false,
       "assets": [
         {
           "platform": "android",
           "arch": "universal",
           "file_name": "voiceinput-android-v1.2.8.apk",
-          "sha256": "45fe844e41042150aff5d82f5fd875a840fb096b8c6b2747f6abf9221c503bf4",
-          "size": 33389294,
+          "sha256": "4b4574eff60945cda957c0eb1894355c38775fdfc48406d83305e2517d0ddecd",
+          "size": 35121958,
           "mime_type": "application/vnd.android.package-archive"
         },
         {
           "platform": "windows",
           "arch": "x64",
           "file_name": "voiceinput-desktop-windows-x64-v1.2.8-setup.exe",
-          "sha256": "0d0afaf8daa53dac2316abc66821dc67ae098b7e53dd84958801e637cc8088a2",
-          "size": 6299620,
+          "sha256": "acfb0d07d7f39fa6122beae9f7f396a3248c48b42bce2faaad98fe0ab331d1a1",
+          "size": 6296144,
           "mime_type": "application/vnd.microsoft.portable-executable"
         },
         {
           "platform": "windows",
           "arch": "x64",
           "file_name": "voiceinput-desktop-windows-x64-v1.2.8.msi",
-          "sha256": "f734dd2ef7ea923726362f7ee3c895d258b5824de681691b03be443c5aa6a352",
-          "size": 9297920,
+          "sha256": "b461794218dee3dc5000ec68ced8c6baa8333c68a91e019c93e83bb576069062",
+          "size": 9310208,
           "mime_type": "application/x-msi"
         }
       ]
