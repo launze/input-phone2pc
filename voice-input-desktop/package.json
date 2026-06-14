@@ -1,12 +1,13 @@
 {
   "name": "voice-input-desktop",
-  "version": "1.2.5",
+  "version": "1.2.8",
   "description": "手机转电脑语音输入助手",
   "type": "module",
   "scripts": {
     "dev": "tauri dev",
     "build": "tauri build",
-    "tauri": "tauri"
+    "tauri": "tauri",
+    "test:unit": "node --test src/*.test.js"
   },
   "dependencies": {},
   "devDependencies": {

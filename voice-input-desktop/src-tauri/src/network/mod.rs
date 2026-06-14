@@ -3,7 +3,10 @@ pub mod discovery;
 pub mod protocol;
 pub mod websocket;
 
-use crate::storage::history::{self, NewHistoryRecord};
+use crate::storage::{
+    config::AppConfig,
+    history::{self, NewHistoryRecord},
+};
 use base64::Engine;
 use std::error::Error;
 use std::fs;
@@ -134,16 +137,16 @@ async fn handle_server_messages(
                     match payload_type {
                         "TEXT_INPUT" => {
                             if let Some(text) = payload.get("text").and_then(|v| v.as_str()) {
-                                if should_inject {
-                                    crate::input::simulate_text_input(text);
-                                    if payload
+                                let input_result = handle_text_input_by_mode(
+                                    text,
+                                    payload
                                         .get("press_enter")
                                         .and_then(|v| v.as_bool())
-                                        .unwrap_or(false)
-                                    {
-                                        let _ = crate::input::simulate_enter_key();
-                                    }
-                                }
+                                        .unwrap_or(false),
+                                    !should_inject,
+                                );
+                                let history_delivery_mode =
+                                    history_delivery_mode_for_text_input(delivery_mode, &input_result.mode);
 
                                 if let Some(ref handle) = app_handle {
                                     if let Some(record) = build_history_record(
@@ -152,7 +155,7 @@ async fn handle_server_messages(
                                         from_name,
                                         payload,
                                         "server",
-                                        delivery_mode,
+                                        &history_delivery_mode,
                                         received_at,
                                         None,
                                     ) {
@@ -167,17 +170,19 @@ async fn handle_server_messages(
                                         "via": "server",
                                         "timestamp": received_at,
                                         "sent_at": payload.get("timestamp").and_then(|v| v.as_i64()).unwrap_or(received_at),
-                                        "delivery_mode": delivery_mode
+                                        "delivery_mode": history_delivery_mode
                                     });
                                     handle.emit("text_received", &text_payload).unwrap_or(());
+                                    handle.emit("input_result", &input_result).unwrap_or(());
                                 }
 
                                 send_relay_ack(
                                     &my_device_id,
                                     from_id,
                                     "text",
-                                    true,
+                                    input_result.success,
                                     Some(message_id.as_str()),
+                                    payload.get("client_message_id").and_then(|value| value.as_str()),
                                 )
                                 .await;
                             }
@@ -228,6 +233,7 @@ async fn handle_server_messages(
                                 "image",
                                 success,
                                 Some(message_id.as_str()),
+                                payload.get("client_message_id").and_then(|value| value.as_str()),
                             )
                             .await;
                         }
@@ -278,8 +284,105 @@ async fn handle_server_messages(
                                 "file",
                                 success,
                                 Some(message_id.as_str()),
+                                payload.get("client_message_id").and_then(|value| value.as_str()),
                             )
                             .await;
+                        }
+                        "NOTIFICATION_INPUT" => {
+                            if payload
+                                .get("copy_to_clipboard")
+                                .and_then(|v| v.as_bool())
+                                .unwrap_or(false)
+                            {
+                                let app_name = payload
+                                    .get("app_name")
+                                    .and_then(|v| v.as_str())
+                                    .unwrap_or("未知应用");
+                                let title = payload.get("title").and_then(|v| v.as_str()).unwrap_or("");
+                                let text = payload.get("text").and_then(|v| v.as_str()).unwrap_or("");
+                                let content = format_notification_content(app_name, title, text);
+                                let _ = crate::input::copy_text_to_clipboard(&content);
+                            }
+                            if let Some(ref handle) = app_handle {
+                                if let Some(record) = build_history_record(
+                                    message_id.clone(),
+                                    from_id,
+                                    from_name,
+                                    payload,
+                                    "server",
+                                    delivery_mode,
+                                    received_at,
+                                    None,
+                                ) {
+                                    emit_history_record(handle, record);
+                                }
+
+                                let notification_payload = serde_json::json!({
+                                    "record_id": message_id,
+                                    "from_device_id": from_id,
+                                    "from_device_name": from_name,
+                                    "via": "server",
+                                    "timestamp": received_at,
+                                    "sent_at": payload.get("timestamp").and_then(|v| v.as_i64()).unwrap_or(received_at),
+                                    "delivery_mode": delivery_mode,
+                                    "app_name": payload.get("app_name").and_then(|v| v.as_str()).unwrap_or(""),
+                                    "app_package": payload.get("app_package").and_then(|v| v.as_str()).unwrap_or(""),
+                                    "title": payload.get("title").and_then(|v| v.as_str()).unwrap_or(""),
+                                    "text": payload.get("text").and_then(|v| v.as_str()).unwrap_or(""),
+                                    "content": format_notification_content(
+                                        payload.get("app_name").and_then(|v| v.as_str()).unwrap_or(""),
+                                        payload.get("title").and_then(|v| v.as_str()).unwrap_or(""),
+                                        payload.get("text").and_then(|v| v.as_str()).unwrap_or("")
+                                    ),
+                                    "forward_mode": payload.get("forward_mode").and_then(|v| v.as_str()),
+                                    "silent": payload.get("silent").and_then(|v| v.as_bool()).unwrap_or(false),
+                                    "copy_to_clipboard": payload.get("copy_to_clipboard").and_then(|v| v.as_bool()).unwrap_or(false)
+                                });
+                                handle
+                                    .emit("notification_received", &notification_payload)
+                                    .unwrap_or(());
+                            }
+
+                            send_relay_ack(
+                                &my_device_id,
+                                from_id,
+                                "notification",
+                                true,
+                                Some(message_id.as_str()),
+                                payload.get("client_message_id").and_then(|value| value.as_str()),
+                            )
+                            .await;
+                        }
+                        "AI_ASSISTANT_REQUEST" => {
+                            if let Some(ref handle) = app_handle {
+                                let request_payload = serde_json::json!({
+                                    "request_id": payload.get("request_id").and_then(|v| v.as_str()).unwrap_or(message_id.as_str()),
+                                    "question": payload.get("question").and_then(|v| v.as_str()).unwrap_or(""),
+                                    "session_id": payload.get("session_id").and_then(|v| v.as_str()),
+                                    "filters": payload.get("filters").cloned(),
+                                    "from_device_id": from_id,
+                                    "from_device_name": from_name,
+                                    "via": "server",
+                                    "timestamp": received_at
+                                });
+                                handle
+                                    .emit("remote_ai_assistant_request", &request_payload)
+                                    .unwrap_or(());
+                            }
+                        }
+                        "AI_ASSISTANT_CANCEL" => {
+                            if let Some(ref handle) = app_handle {
+                                let cancel_payload = serde_json::json!({
+                                    "request_id": payload.get("request_id").and_then(|v| v.as_str()).unwrap_or(message_id.as_str()),
+                                    "from_device_id": from_id,
+                                    "from_device_name": from_name,
+                                    "via": "server",
+                                    "timestamp": received_at
+                                });
+                                handle
+                                    .emit("remote_ai_assistant_cancel", &cancel_payload)
+                                    .unwrap_or(());
+                            }
                         }
                         _ => {}
                     }
@@ -597,8 +700,78 @@ fn build_history_record(
                 metadata: Some(metadata),
             })
         }
+        "NOTIFICATION_INPUT" => {
+            let app_name = payload
+                .get("app_name")
+                .and_then(|v| v.as_str())
+                .unwrap_or("未知应用");
+            let app_package = payload
+                .get("app_package")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            let title = payload.get("title").and_then(|v| v.as_str()).unwrap_or("");
+            let text = payload.get("text").and_then(|v| v.as_str()).unwrap_or("");
+            let content = format_notification_content(app_name, title, text);
+            let metadata = serde_json::json!({
+                "app_name": app_name,
+                "app_package": app_package,
+                "title": title,
+                "text": text,
+                "forward_mode": payload.get("forward_mode").and_then(|v| v.as_str()),
+                "silent": payload.get("silent").and_then(|v| v.as_bool()),
+                "copy_to_clipboard": payload.get("copy_to_clipboard").and_then(|v| v.as_bool()),
+                "notification_key": payload.get("notification_key").and_then(|v| v.as_str()),
+                "channel_id": payload.get("channel_id").and_then(|v| v.as_str()),
+                "group_key": payload.get("group_key").and_then(|v| v.as_str()),
+                "category": payload.get("category").and_then(|v| v.as_str()),
+                "sub_text": payload.get("sub_text").and_then(|v| v.as_str()),
+                "big_text": payload.get("big_text").and_then(|v| v.as_str()),
+                "conversation_title": payload.get("conversation_title").and_then(|v| v.as_str()),
+                "post_time": payload.get("post_time").and_then(|v| v.as_i64()),
+                "is_ongoing": payload.get("is_ongoing").and_then(|v| v.as_bool()),
+                "is_clearable": payload.get("is_clearable").and_then(|v| v.as_bool()),
+                "importance": payload.get("importance").and_then(|v| v.as_i64()),
+                "icon": payload.get("icon").and_then(|v| v.as_str())
+            })
+            .to_string();
+            Some(NewHistoryRecord {
+                id,
+                from_device_id: from_device_id.to_string(),
+                from_device_name: from_device_name.to_string(),
+                content_type: "notification".to_string(),
+                content,
+                sent_at,
+                received_at,
+                via: via.to_string(),
+                delivery_mode: delivery_mode.to_string(),
+                metadata: Some(metadata),
+            })
+        }
         _ => None,
     }
+}
+
+fn history_delivery_mode_for_text_input(delivery_mode: &str, input_mode: &str) -> String {
+    if delivery_mode == "offline_sync" || input_mode == "history_only" {
+        "offline_sync".to_string()
+    } else if input_mode == "confirm" {
+        "manual".to_string()
+    } else {
+        delivery_mode.to_string()
+    }
+}
+
+fn format_notification_content(app_name: &str, title: &str, text: &str) -> String {
+    let mut content = format!("[通知] {}", app_name);
+    if !title.trim().is_empty() {
+        content.push_str(" - ");
+        content.push_str(title.trim());
+    }
+    if !text.trim().is_empty() {
+        content.push('\n');
+        content.push_str(text.trim());
+    }
+    content
 }
 
 fn save_clipboard_file(payload: &serde_json::Value) -> Result<PathBuf, Box<dyn Error + Send + Sync>> {
@@ -708,19 +881,77 @@ fn emit_history_record(app_handle: &AppHandle, record: NewHistoryRecord) {
     }
 }
 
+#[derive(serde::Serialize)]
+struct TextInputResult {
+    success: bool,
+    mode: String,
+    message: String,
+    timestamp: i64,
+}
+
+fn handle_text_input_by_mode(text: &str, press_enter: bool, skip_injection: bool) -> TextInputResult {
+    let now = chrono::Utc::now().timestamp_millis();
+    if skip_injection {
+        return TextInputResult {
+            success: true,
+            mode: "history_only".to_string(),
+            message: "离线补发已保存到历史，未自动插入。".to_string(),
+            timestamp: now,
+        };
+    }
+
+    let mode = AppConfig::load().input_mode;
+    match mode.as_str() {
+        "clipboard" => match crate::input::copy_text_to_clipboard(text) {
+            Ok(_) => TextInputResult {
+                success: true,
+                mode,
+                message: "已复制到剪贴板。".to_string(),
+                timestamp: now,
+            },
+            Err(error) => TextInputResult {
+                success: false,
+                mode,
+                message: error,
+                timestamp: now,
+            },
+        },
+        "confirm" => TextInputResult {
+            success: true,
+            mode,
+            message: "已保存到历史，等待手动插入。".to_string(),
+            timestamp: now,
+        },
+        _ => {
+            crate::input::simulate_text_input(text);
+            if press_enter {
+                let _ = crate::input::simulate_enter_key();
+            }
+            TextInputResult {
+                success: true,
+                mode: "direct".to_string(),
+                message: "已直接插入到当前光标位置。".to_string(),
+                timestamp: now,
+            }
+        }
+    }
+}
+
 async fn send_relay_ack(
     my_device_id: &str,
     target_device_id: &str,
     content_type: &str,
     success: bool,
     server_message_id: Option<&str>,
+    client_message_id: Option<&str>,
 ) {
     let ack_payload = serde_json::json!({
         "type": "INPUT_ACK",
         "success": success,
         "content_type": content_type,
         "timestamp": chrono::Utc::now().timestamp_millis(),
-        "server_message_id": server_message_id
+        "server_message_id": server_message_id,
+        "client_message_id": client_message_id
     });
     let relay_ack = serde_json::json!({
         "type": "RELAY_MESSAGE",

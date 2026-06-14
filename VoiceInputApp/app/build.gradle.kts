@@ -12,8 +12,8 @@ android {
         applicationId = "com.voiceinput"
         minSdk = 24
         targetSdk = 34
-        versionCode = 7
-        versionName = "1.2.5"
+        versionCode = 10
+        versionName = "1.2.8"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {

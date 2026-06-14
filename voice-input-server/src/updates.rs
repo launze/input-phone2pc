@@ -367,7 +367,7 @@ fn render_download_page(service: &UpdateService, channel: &str) -> Result<String
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-      <title>语传-手机转电脑语音输入助手</title>
+      <title>语传-手机转电脑输入助手</title>
   <style>
     :root {{ color-scheme: light; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }}
     body {{ margin: 0; background: #f6f8fb; color: #172033; }}
@@ -402,16 +402,16 @@ fn render_download_page(service: &UpdateService, channel: &str) -> Result<String
 <body>
   <main>
     <header>
-      <h1>语传-手机转电脑语音输入助手</h1>
-      <p>手机端语音、文字、图片和文件快速发送到电脑端；电脑端接收后可复制、编辑、插入到光标位置，并管理历史记录。</p>
+      <h1>语传-手机转电脑输入助手</h1>
+      <p>手机端使用任意输入法输入后，将最终文字、图片、文件和通知同步到电脑端；电脑端接收后可复制、编辑、插入到光标位置，并管理历史记录。</p>
       <div class="intro">
         <div class="intro-card">
           <h2>手机端</h2>
-          <p>支持语音输入、文字发送、图片发送、扫码接收文件、历史记录查看，以及手动检查和安装新版本。</p>
+          <p>支持输入法文字发送、图片发送、扫码接收文件、通知转发、历史记录查看，以及手动检查和安装新版本。</p>
         </div>
         <div class="intro-card">
           <h2>电脑端</h2>
-          <p>支持扫码配对、自动接收手机内容、文字工作区、历史记录导出、AI 报告生成，以及手动检查和下载新版本。</p>
+          <p>支持扫码配对、自动接收手机内容、文字工作区、历史记录导出、AI 助手和 Skills，以及手动检查和下载新版本。</p>
         </div>
       </div>
       <p style="margin-top: 14px;">当前版本 {version}，频道 {channel}</p>

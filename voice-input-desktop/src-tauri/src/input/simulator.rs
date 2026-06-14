@@ -15,6 +15,13 @@ pub fn simulate_text_input(text: &str) {
     }
 }
 
+pub fn copy_text_to_clipboard(text: &str) -> Result<(), String> {
+    let mut clipboard = Clipboard::new().map_err(|e| format!("failed to open clipboard: {}", e))?;
+    clipboard
+        .set_text(text.to_string())
+        .map_err(|e| format!("failed to set clipboard text: {}", e))
+}
+
 pub fn simulate_enter_key() -> Result<(), ()> {
     thread::sleep(Duration::from_millis(80));
 

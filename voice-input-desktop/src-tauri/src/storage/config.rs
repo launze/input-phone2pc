@@ -15,8 +15,9 @@ pub struct AppConfig {
     pub server_url: String,
     pub device_id: String,
     pub device_name: String,
+    pub input_mode: String,
     pub paired_devices: Vec<PairedDevice>,
-    pub openai: OpenAiReportConfig,
+    pub openai: OpenAiConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -28,20 +29,10 @@ pub struct PairedDevice {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
-pub struct OpenAiReportConfig {
+pub struct OpenAiConfig {
     pub api_key: String,
     pub api_url: String,
     pub model_name: String,
-    #[serde(default = "default_weekly_prompt_template")]
-    pub weekly_prompt_template: String,
-    #[serde(default = "default_monthly_prompt_template")]
-    pub monthly_prompt_template: String,
-    #[serde(default = "default_quarterly_prompt_template")]
-    pub quarterly_prompt_template: String,
-    #[serde(default = "default_half_year_prompt_template")]
-    pub half_year_prompt_template: String,
-    #[serde(default = "default_yearly_prompt_template")]
-    pub yearly_prompt_template: String,
 }
 
 impl Default for AppConfig {
@@ -54,23 +45,19 @@ impl Default for AppConfig {
                 .ok()
                 .and_then(|h| h.into_string().ok())
                 .unwrap_or_else(|| "本机".to_string()),
+            input_mode: "direct".to_string(),
             paired_devices: Vec::new(),
-            openai: OpenAiReportConfig::default(),
+            openai: OpenAiConfig::default(),
         }
     }
 }
 
-impl Default for OpenAiReportConfig {
+impl Default for OpenAiConfig {
     fn default() -> Self {
         Self {
             api_key: String::new(),
             api_url: "https://api.openai.com/v1/responses".to_string(),
             model_name: "gpt-5-mini".to_string(),
-            weekly_prompt_template: default_weekly_prompt_template(),
-            monthly_prompt_template: default_monthly_prompt_template(),
-            quarterly_prompt_template: default_quarterly_prompt_template(),
-            half_year_prompt_template: default_half_year_prompt_template(),
-            yearly_prompt_template: default_yearly_prompt_template(),
         }
     }
 }
@@ -121,6 +108,13 @@ impl AppConfig {
         self.server_mode_enabled = enabled;
     }
 
+    pub fn set_input_mode(&mut self, mode: String) {
+        self.input_mode = match mode.as_str() {
+            "clipboard" | "confirm" => mode,
+            _ => "direct".to_string(),
+        };
+    }
+
     pub fn add_paired_device(&mut self, device_id: String, device_name: String) {
         if !self.paired_devices.iter().any(|d| d.device_id == device_id) {
             self.paired_devices.push(PairedDevice {
@@ -135,7 +129,7 @@ impl AppConfig {
         self.paired_devices.retain(|d| d.device_id != device_id);
     }
 
-    pub fn set_openai_config(&mut self, openai: OpenAiReportConfig) {
+    pub fn set_openai_config(&mut self, openai: OpenAiConfig) {
         self.openai = openai;
     }
 }
@@ -146,99 +140,4 @@ fn migrate_server_url(config: &mut AppConfig) -> bool {
         return true;
     }
     false
-}
-
-fn default_weekly_prompt_template() -> String {
-    [
-        "请基于以下语音输入历史，为我生成一份结构清晰的中文周报。",
-        "时间范围：{{start_date}} 至 {{end_date}}",
-        "记录数：{{record_count}}",
-        "",
-        "输出要求：",
-        "1. 先给出一句总览。",
-        "2. 按 3 到 5 个主题归纳本周主要工作。",
-        "3. 明确列出已完成事项、待跟进事项、风险或阻塞。",
-        "4. 如原始记录信息不足，请明确写“记录中未体现”。",
-        "5. 不要虚构事实，只能依据提供的记录总结。",
-        "",
-        "原始记录：",
-        "{{records}}",
-    ]
-    .join("\n")
-}
-
-fn default_monthly_prompt_template() -> String {
-    [
-        "请基于以下语音输入历史，为我生成一份结构清晰的中文月报。",
-        "时间范围：{{start_date}} 至 {{end_date}}",
-        "记录数：{{record_count}}",
-        "",
-        "输出要求：",
-        "1. 先写本月总体概述。",
-        "2. 按主题归纳核心成果与关键推进事项。",
-        "3. 单独列出重点里程碑、待办和下月建议跟进方向。",
-        "4. 如原始记录信息不足，请明确写“记录中未体现”。",
-        "5. 不要虚构事实，只能依据提供的记录总结。",
-        "",
-        "原始记录：",
-        "{{records}}",
-    ]
-    .join("\n")
-}
-
-fn default_quarterly_prompt_template() -> String {
-    [
-        "请基于以下语音输入历史，为我生成一份结构清晰的中文季度报表。",
-        "时间范围：{{start_date}} 至 {{end_date}}",
-        "记录数：{{record_count}}",
-        "",
-        "输出要求：",
-        "1. 先写本季度总体概述。",
-        "2. 按主题归纳核心成果、关键推进事项和阶段性变化。",
-        "3. 单独列出重点里程碑、未完成事项、风险阻塞和下季度建议。",
-        "4. 如原始记录信息不足，请明确写“记录中未体现”。",
-        "5. 不要虚构事实，只能依据提供的记录总结。",
-        "",
-        "原始记录：",
-        "{{records}}",
-    ]
-    .join("\n")
-}
-
-fn default_half_year_prompt_template() -> String {
-    [
-        "请基于以下语音输入历史，为我生成一份结构清晰的中文半年报。",
-        "时间范围：{{start_date}} 至 {{end_date}}",
-        "记录数：{{record_count}}",
-        "",
-        "输出要求：",
-        "1. 先写半年度总体概述。",
-        "2. 按主题归纳主要成果、重要推进事项和阶段性进展。",
-        "3. 总结关键里程碑、经验沉淀、风险阻塞和下半年/下一阶段建议。",
-        "4. 如原始记录信息不足，请明确写“记录中未体现”。",
-        "5. 不要虚构事实，只能依据提供的记录总结。",
-        "",
-        "原始记录：",
-        "{{records}}",
-    ]
-    .join("\n")
-}
-
-fn default_yearly_prompt_template() -> String {
-    [
-        "请基于以下语音输入历史，为我生成一份结构清晰的中文年报。",
-        "时间范围：{{start_date}} 至 {{end_date}}",
-        "记录数：{{record_count}}",
-        "",
-        "输出要求：",
-        "1. 先写年度总体概述。",
-        "2. 按主题归纳年度核心成果、关键项目和重要推进事项。",
-        "3. 总结重点里程碑、问题风险、经验沉淀和下一年度建议方向。",
-        "4. 如原始记录信息不足，请明确写“记录中未体现”。",
-        "5. 不要虚构事实，只能依据提供的记录总结。",
-        "",
-        "原始记录：",
-        "{{records}}",
-    ]
-    .join("\n")
 }

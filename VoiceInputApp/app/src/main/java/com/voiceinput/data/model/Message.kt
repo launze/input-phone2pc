@@ -49,6 +49,32 @@ sealed class Message {
         val type = "TEXT_INPUT"
     }
 
+    data class NotificationInput(
+        @SerializedName("app_name") val appName: String,
+        @SerializedName("app_package") val appPackage: String,
+        val title: String,
+        val text: String,
+        val timestamp: Long,
+        @SerializedName("notification_key") val notificationKey: String = "",
+        @SerializedName("channel_id") val channelId: String = "",
+        @SerializedName("group_key") val groupKey: String = "",
+        val category: String = "",
+        @SerializedName("sub_text") val subText: String = "",
+        @SerializedName("big_text") val bigText: String = "",
+        @SerializedName("conversation_title") val conversationTitle: String = "",
+        @SerializedName("post_time") val postTime: Long = timestamp,
+        @SerializedName("is_ongoing") val isOngoing: Boolean = false,
+        @SerializedName("is_clearable") val isClearable: Boolean = true,
+        val importance: Int = 3,
+        @SerializedName("forward_mode") val forwardMode: String = "pc_center",
+        val silent: Boolean = false,
+        @SerializedName("copy_to_clipboard") val copyToClipboard: Boolean = false,
+        val icon: String? = null
+    ) : Message() {
+        @SerializedName("type")
+        val type = "NOTIFICATION_INPUT"
+    }
+
     data class ImageInput(
         @SerializedName("mime_type") val mimeType: String,
         @SerializedName("file_name") val fileName: String,

@@ -72,6 +72,10 @@ config.json
 *.temp
 *.bak
 .runtime/
+release-artifacts/
 
 # AI config files
 CLAUDE.md
+
+# Local deploy secrets
+.deploy/

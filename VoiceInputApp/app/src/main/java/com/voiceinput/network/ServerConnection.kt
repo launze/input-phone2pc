@@ -56,7 +56,7 @@ class ServerConnection(private val context: Context) {
     private var registeredDeviceId: String? = null
 
     var onRelayMessageReceived: ((fromDeviceId: String, payload: JsonObject) -> Unit)? = null
-    var onRelayStored: ((messageId: String, toDeviceId: String, storedAt: Long, queued: Boolean) -> Unit)? = null
+    var onRelayStored: ((messageId: String, toDeviceId: String, storedAt: Long, queued: Boolean, clientMessageId: String?) -> Unit)? = null
     var onPairConfirmed: ((success: Boolean, fromDeviceId: String, fromDeviceName: String, toDeviceId: String, toDeviceName: String, message: String) -> Unit)? = null
     var onPairedDeviceOnline: ((deviceId: String, deviceName: String, deviceType: String) -> Unit)? = null
     var onUnpairNotify: ((deviceId: String, deviceName: String) -> Unit)? = null
@@ -220,7 +220,7 @@ class ServerConnection(private val context: Context) {
                     val toDeviceId = msg.toDeviceId ?: return
                     val storedAt = msg.storedAt ?: System.currentTimeMillis()
                     val queued = msg.queued ?: false
-                    onRelayStored?.invoke(messageId, toDeviceId, storedAt, queued)
+                    onRelayStored?.invoke(messageId, toDeviceId, storedAt, queued, msg.clientMessageId)
                 }
                 "HEARTBEAT" -> Log.d(TAG, "Heartbeat received")
                 "SERVER_PAIR_RESPONSE" -> {

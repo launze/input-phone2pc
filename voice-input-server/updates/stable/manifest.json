@@ -1,8 +1,104 @@
 {
   "channel": "stable",
-  "latest_version": "1.2.5",
+  "latest_version": "1.2.8",
   "minimum_supported_version": "0.0.1",
   "releases": [
+    {
+      "version": "1.2.8",
+      "release_notes": "PC 端 AI 助手右侧增加工具调用、引用记录、导出文件 Tab；会话列表精简为名称和时间并加宽；移除底部历史加载区域。",
+      "published_at": "2026-06-14T09:19:24+08:00",
+      "force_update": false,
+      "assets": [
+        {
+          "platform": "android",
+          "arch": "universal",
+          "file_name": "voiceinput-android-v1.2.8.apk",
+          "sha256": "45fe844e41042150aff5d82f5fd875a840fb096b8c6b2747f6abf9221c503bf4",
+          "size": 33389294,
+          "mime_type": "application/vnd.android.package-archive"
+        },
+        {
+          "platform": "windows",
+          "arch": "x64",
+          "file_name": "voiceinput-desktop-windows-x64-v1.2.8-setup.exe",
+          "sha256": "0d0afaf8daa53dac2316abc66821dc67ae098b7e53dd84958801e637cc8088a2",
+          "size": 6299620,
+          "mime_type": "application/vnd.microsoft.portable-executable"
+        },
+        {
+          "platform": "windows",
+          "arch": "x64",
+          "file_name": "voiceinput-desktop-windows-x64-v1.2.8.msi",
+          "sha256": "f734dd2ef7ea923726362f7ee3c895d258b5824de681691b03be443c5aa6a352",
+          "size": 9297920,
+          "mime_type": "application/x-msi"
+        }
+      ]
+    },
+    {
+      "version": "1.2.7",
+      "release_notes": "手机端首页消息卡片布局调整：正文、状态、时间和操作按钮分区显示，收藏、置顶、标签、复用、删除等操作移到底部，避免图片和长文件名挤乱排版。手机端更新检查优先使用公网发布服务器，避免被当前局域网连接地址影响。",
+      "published_at": "2026-06-13T21:45:00+08:00",
+      "force_update": false,
+      "assets": [
+        {
+          "platform": "android",
+          "arch": "universal",
+          "file_name": "voiceinput-android-v1.2.7.apk",
+          "sha256": "c08a0f52c678a4df8809d2af6819ca2575f8441594bc944c1a0f9a81559e607c",
+          "size": 33393394,
+          "mime_type": "application/vnd.android.package-archive"
+        },
+        {
+          "platform": "windows",
+          "arch": "x64",
+          "file_name": "voiceinput-desktop-windows-x64-v1.2.7-setup.exe",
+          "sha256": "35e485a2efdcb8560a1c6dec51403cfaafcc077f01e7a4767c40e8dae6f2629d",
+          "size": 6287055,
+          "mime_type": "application/vnd.microsoft.portable-executable"
+        },
+        {
+          "platform": "windows",
+          "arch": "x64",
+          "file_name": "voiceinput-desktop-windows-x64-v1.2.7.msi",
+          "sha256": "20da49dcefa5d524a60bccec73d29f5fcbf9432255a94ef850e834e2804bd78f",
+          "size": 9297920,
+          "mime_type": "application/x-msi"
+        }
+      ]
+    },
+    {
+      "version": "1.2.6",
+      "release_notes": "手机端首页输入栏恢复图片、文件、扫码、拍照、复制、粘贴等图标工具条；输入记录与通知记录继续分离。PC 端 AI 助手主界面精简，推荐问题可一键注入编辑框，AI 设置和 Skills 移入设置面板。",
+      "published_at": "2026-06-13T21:20:00+08:00",
+      "force_update": false,
+      "assets": [
+        {
+          "platform": "android",
+          "arch": "universal",
+          "file_name": "voiceinput-android-v1.2.6.apk",
+          "sha256": "0bdef8c99ab179a4a0abc78ff72ebcb61a48ba6b88e19537a12d6d44b6d16d00",
+          "size": 33393390,
+          "mime_type": "application/vnd.android.package-archive"
+        },
+        {
+          "platform": "windows",
+          "arch": "x64",
+          "file_name": "voiceinput-desktop-windows-x64-v1.2.6-setup.exe",
+          "sha256": "6e55991a5338943e588fe91481e4f33d1a14cb760a77f217fdc2a543b7862af7",
+          "size": 6288559,
+          "mime_type": "application/vnd.microsoft.portable-executable"
+        },
+        {
+          "platform": "windows",
+          "arch": "x64",
+          "file_name": "voiceinput-desktop-windows-x64-v1.2.6.msi",
+          "sha256": "3c24857065127935af95022681bce0e07116a94ddb4b758063ec17e78a9ce976",
+          "size": 9297920,
+          "mime_type": "application/x-msi"
+        }
+      ]
+    },
     {
       "version": "1.2.5",
       "release_notes": "## 语传 1.2.5\n\n- 手机端显示真实版本号，支持手动检查更新、下载并安装新 APK。\n- 电脑端显示真实版本号，支持手动检查更新、下载并打开安装包。\n- 扫码传输文件修复竖屏摄像头方向、OpenCV 初始化和连续解码问题。\n- 历史记录进入页面或内容更新后自动滚动到最新记录。\n- 图标更新为扁平简约风格。",

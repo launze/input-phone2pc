@@ -13,6 +13,12 @@ data class HistoryItem(
     val storedAt: Long? = null,
     val syncedAt: Long? = null,
     val errorMessage: String? = null,
+    val isFavorite: Boolean = false,
+    val isPinned: Boolean = false,
+    val tags: String = "",
+    val sourceApp: String = "",
+    val sourcePackage: String = "",
+    val metadata: String = "",
 ) {
     val isPending: Boolean
         get() = syncStatus == SyncStatus.PENDING || syncStatus == SyncStatus.STORED

@@ -3,55 +3,57 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>语传-手机转电脑语音输入助手</title>
+    <title>语传-手机输入到电脑</title>
     <link rel="stylesheet" href="styles.css">
 </head>
 <body>
     <div class="container">
-        <!-- 顶部工具栏 -->
         <div class="toolbar">
             <div class="toolbar-left">
                 <span class="app-title">语传</span>
                 <span class="app-version" id="app-version">v--</span>
                 <div class="toolbar-divider"></div>
-
-                <!-- 服务器模式 -->
-                <div class="toolbar-item">
-                    <label class="switch">
-                        <input type="checkbox" id="server-mode-toggle">
-                        <span class="slider"></span>
-                    </label>
-                    <span class="toolbar-label">服务器中转</span>
-                    <span class="server-dot" id="server-dot"></span>
-                    <button id="edit-url-btn" class="toolbar-btn" title="编辑服务器地址">编辑</button>
-                </div>
-
-                <div class="toolbar-divider"></div>
-
-                <!-- 网络信息 -->
-                <div class="toolbar-item network-info">
-                    <span class="net-badge">UDP:58888</span>
-                    <span class="net-badge">TCP:58889</span>
-                </div>
-            </div>
-
-            <div class="toolbar-right">
-                <!-- GitHub 链接 -->
-                <a href="https://github.com/launze/input-phone2pc" target="_blank" class="github-link" title="GitHub 仓库">
-                    <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
-                    <span>GitHub</span>
-                </a>
-                <!-- 设备连接状态 -->
                 <div class="device-status" id="device-status">
                     <span class="status-indicator" id="status-indicator"></span>
                     <span id="status-text">等待连接</span>
                     <span id="device-name" style="display:none;"></span>
-                    <button id="unpair-btn" class="toolbar-btn unpair-btn" style="display:none;" title="取消配对">取消配对</button>
                 </div>
-                <div class="update-status" id="update-status">
-                    <button id="check-update-btn" class="toolbar-btn" title="手动检查更新">检查更新</button>
-                    <button id="install-update-btn" class="toolbar-btn" style="display:none;" title="下载安装新版本">下载更新</button>
-                    <span id="update-text"></span>
+                <div class="server-status-pill" title="服务器中转状态">
+                    <span class="server-dot" id="server-dot"></span>
+                    <span>服务器中转</span>
+                </div>
+            </div>
+
+            <div class="toolbar-right">
+                <button id="toolbar-settings-btn" class="toolbar-menu-button" type="button" aria-expanded="false" aria-controls="toolbar-settings-menu">设置</button>
+                <div id="toolbar-settings-menu" class="toolbar-menu" style="display:none;">
+                    <div class="toolbar-menu-section">
+                        <div class="toolbar-menu-title">连接</div>
+                        <label class="toolbar-menu-row">
+                            <span>服务器中转</span>
+                            <label class="switch">
+                                <input type="checkbox" id="server-mode-toggle">
+                                <span class="slider"></span>
+                            </label>
+                        </label>
+                        <button id="edit-url-btn" class="toolbar-menu-action" type="button">编辑服务器地址</button>
+                        <div class="toolbar-menu-meta">
+                            <span>UDP 58888</span>
+                            <span>TCP 58889</span>
+                        </div>
+                        <button id="unpair-btn" class="toolbar-menu-action danger" type="button" style="display:none;">取消配对</button>
+                    </div>
+                    <div class="toolbar-menu-section">
+                        <div class="toolbar-menu-title">更新</div>
+                        <div class="update-status" id="update-status">
+                            <button id="check-update-btn" class="toolbar-menu-action" type="button">检查更新</button>
+                            <button id="install-update-btn" class="toolbar-menu-action" type="button" style="display:none;">下载更新</button>
+                            <span id="update-text"></span>
+                        </div>
+                    </div>
+                    <div class="toolbar-menu-section">
+                        <a href="https://github.com/launze/input-phone2pc" target="_blank" class="toolbar-menu-link" title="GitHub 仓库">GitHub 仓库</a>
+                    </div>
                 </div>
             </div>
         </div>
@@ -77,10 +79,20 @@
                     <!-- 使用说明 -->
                     <div class="guide-area">
                         <h2>快速开始</h2>
+                        <div class="pairing-mode-grid">
+                            <div class="pairing-mode-card">
+                                <div class="pairing-mode-title">局域网配对</div>
+                                <div class="pairing-mode-desc">手机和电脑在同一网络时可直连，延迟低，不依赖中转服务器。</div>
+                            </div>
+                            <div class="pairing-mode-card primary">
+                                <div class="pairing-mode-title">服务器中转配对</div>
+                                <div class="pairing-mode-desc">跨网络或局域网不可达时使用中转，先在右上设置中开启服务器中转。</div>
+                            </div>
+                        </div>
                         <div class="steps">
                             <div class="step">
                                 <span class="step-num">1</span>
-                                <span>打开顶部服务器中转开关，等待连接成功（绿色圆点）</span>
+                                <span>在手机 App 选择局域网直连或服务器中转</span>
                             </div>
                             <div class="step">
                                 <span class="step-num">2</span>
@@ -88,10 +100,10 @@
                             </div>
                             <div class="step">
                                 <span class="step-num">3</span>
-                                <span>在手机上输入或语音输入文字，电脑自动接收</span>
+                                <span>在手机上用任意输入法输入文字，发送后直达电脑</span>
                             </div>
                         </div>
-                        <p class="guide-note">支持局域网直连和服务器中转两种模式</p>
+                        <p class="guide-note">语传接收的是手机输入法生成后的文字；手机语音输入法生成的文字也可以直接发送。</p>
                     </div>
                 </div>
             </div>
@@ -99,45 +111,153 @@
             <!-- 历史记录区（配对后显示） -->
             <div id="history-section" class="history-section" style="display:none;">
                 <div class="history-header">
-                    <span>接收记录</span>
+                    <div class="workspace-tabs" role="tablist" aria-label="工作区">
+                        <button class="workspace-tab active" data-workspace-tab="history">历史记录</button>
+                        <button class="workspace-tab" data-workspace-tab="assistant">AI 助手</button>
+                        <button class="workspace-tab" data-workspace-tab="notifications">通知记录</button>
+                    </div>
                     <div class="history-actions">
-                        <button id="toggle-ai-panel-btn" class="btn-small">AI 报告</button>
-                        <button id="toggle-ai-settings-btn" class="btn-small">AI 设置</button>
-                        <button id="export-week-btn" class="btn-small">导出本周</button>
-                        <button id="export-month-btn" class="btn-small">导出本月</button>
-                        <button id="export-quarter-btn" class="btn-small">导出本季</button>
-                        <button id="export-half-year-btn" class="btn-small">导出本半年</button>
-                        <button id="export-year-btn" class="btn-small">导出本年</button>
-                        <input type="date" id="export-start-date" class="date-input">
-                        <input type="date" id="export-end-date" class="date-input">
-                        <button id="export-range-btn" class="btn-small">导出区间</button>
-                        <button id="clear-history-btn" class="btn-small">清空</button>
+                        <div class="export-menu-wrap">
+                            <button id="history-export-menu-btn" class="btn-small btn-primary" type="button" aria-expanded="false" aria-controls="history-export-menu">导出</button>
+                            <div id="history-export-menu" class="history-export-menu" style="display:none;">
+                                <button id="export-week-btn" class="menu-btn" type="button">本周</button>
+                                <button id="export-month-btn" class="menu-btn" type="button">本月</button>
+                                <button id="export-quarter-btn" class="menu-btn" type="button">本季</button>
+                                <button id="export-half-year-btn" class="menu-btn" type="button">本半年</button>
+                                <button id="export-year-btn" class="menu-btn" type="button">本年</button>
+                                <div class="export-range-row">
+                                    <input type="date" id="export-start-date" class="date-input">
+                                    <input type="date" id="export-end-date" class="date-input">
+                                    <button id="export-range-btn" class="menu-btn primary" type="button">导出区间</button>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="history-more-wrap">
+                            <button id="history-more-menu-btn" class="btn-small" type="button" aria-expanded="false" aria-controls="history-more-menu">更多</button>
+                            <div id="history-more-menu" class="history-more-menu" style="display:none;">
+                                <button id="clear-history-btn" class="menu-btn danger" type="button">清空全部历史</button>
+                            </div>
+                        </div>
                     </div>
                 </div>
 
-                <div id="ai-report-panel" class="ai-report-panel" style="display:none;">
+                <div class="input-control-bar workspace-panel" data-history-only data-history-tool>
+                    <div class="input-mode-group" role="radiogroup" aria-label="接收文字处理方式">
+                        <span class="input-control-label">接收文字</span>
+                        <button class="mode-btn active" data-input-mode="direct">直接插入</button>
+                        <button class="mode-btn" data-input-mode="clipboard">只复制</button>
+                        <button class="mode-btn" data-input-mode="confirm">手动插入</button>
+                    </div>
+                    <div id="last-input-status" class="last-input-status">最近插入：暂无</div>
+                </div>
+
+                <div class="history-filter-bar workspace-panel" data-history-only>
+                    <input id="history-search-input" class="history-search-input" type="search" placeholder="搜索文字、来源或通道">
+                    <select id="history-type-filter" class="history-filter-select" aria-label="内容类型">
+                        <option value="all">全部类型</option>
+                        <option value="text">文本</option>
+                        <option value="image">图片</option>
+                        <option value="file">文件</option>
+                    </select>
+                    <select id="history-channel-filter" class="history-filter-select" aria-label="通道">
+                        <option value="all">全部通道</option>
+                    </select>
+                    <select id="history-device-filter" class="history-filter-select" aria-label="来源设备">
+                        <option value="all">全部来源</option>
+                    </select>
+                    <select id="history-status-filter" class="history-filter-select" aria-label="状态">
+                        <option value="all">全部状态</option>
+                        <option value="received">已接收</option>
+                        <option value="manual">待手动插入</option>
+                        <option value="offline_sync">离线补发</option>
+                        <option value="favorite">收藏</option>
+                        <option value="pinned">置顶</option>
+                    </select>
+                    <select id="history-source-app-filter" class="history-filter-select" aria-label="来源 App">
+                        <option value="all">全部 App</option>
+                    </select>
+                    <input id="history-tag-filter" class="history-search-input compact" type="search" placeholder="标签">
+                    <button id="export-filtered-history-btn" class="btn-small">导出筛选 CSV</button>
+                    <button id="export-filtered-history-txt-btn" class="btn-small">TXT</button>
+                    <button id="export-filtered-history-md-btn" class="btn-small">MD</button>
+                    <button id="export-filtered-history-word-btn" class="btn-small">Word</button>
+                    <button id="toggle-history-selection-btn" class="btn-small">多选</button>
+                    <button id="favorite-selected-history-btn" class="btn-small" style="display:none;">收藏选中</button>
+                    <button id="unfavorite-selected-history-btn" class="btn-small" style="display:none;">取消收藏</button>
+                    <button id="pin-selected-history-btn" class="btn-small" style="display:none;">置顶选中</button>
+                    <button id="unpin-selected-history-btn" class="btn-small" style="display:none;">取消置顶</button>
+                    <button id="export-selected-history-csv-btn" class="btn-small" style="display:none;">选中 CSV</button>
+                    <button id="export-selected-history-txt-btn" class="btn-small" style="display:none;">选中 TXT</button>
+                    <button id="export-selected-history-md-btn" class="btn-small" style="display:none;">选中 MD</button>
+                    <button id="export-selected-history-btn" class="btn-small" style="display:none;">导出选中 Word</button>
+                    <button id="delete-selected-history-btn" class="btn-small danger-action" style="display:none;">删除选中</button>
+                    <button id="reset-history-filters-btn" class="btn-small">重置</button>
+                    <span id="history-filter-summary" class="history-filter-summary"></span>
+                </div>
+
+                <div id="ai-report-panel" class="ai-report-panel workspace-panel" style="display:none;">
                     <div class="ai-panel-toolbar">
                         <div class="ai-panel-summary">
-                            <div class="ai-panel-title">AI 周报 / 月报 / 季报 / 半年报 / 年报</div>
-                            <div id="ai-setup-hint" class="ai-panel-hint">支持流式生成和 Markdown 预览。</div>
+                            <div id="ai-setup-hint" class="ai-panel-hint"></div>
                         </div>
-                        <div class="ai-run-row">
-                            <div class="ai-run-actions">
-                                <button id="generate-weekly-report-btn" class="btn-small btn-primary">生成周报</button>
-                                <button id="generate-monthly-report-btn" class="btn-small btn-primary">生成月报</button>
-                                <button id="generate-quarterly-report-btn" class="btn-small btn-primary">生成季报</button>
-                                <button id="generate-half-year-report-btn" class="btn-small btn-primary">生成半年报</button>
-                                <button id="generate-yearly-report-btn" class="btn-small btn-primary">生成年报</button>
+                        <div id="ai-report-status" class="ai-report-status"></div>
+                    </div>
+
+                    <div class="ai-assistant-card">
+                        <div class="ai-card-header">
+                            <div class="ai-output-actions">
+                                <button id="new-ai-session-btn" class="btn-small">新会话</button>
+                                <button id="toggle-ai-settings-btn" class="btn-small">AI 设置</button>
+                                <button id="export-ai-session-word-btn" class="btn-small">导出会话 Word</button>
+                                <button id="refresh-ai-skills-btn" class="btn-small">刷新</button>
                             </div>
-                            <div id="ai-report-status" class="ai-report-status"></div>
+                        </div>
+                        <div class="ai-assistant-layout">
+                            <div class="ai-session-column">
+                                <div class="ai-section-label">会话</div>
+                                <div id="ai-session-list" class="ai-session-list"></div>
+                            </div>
+                            <div class="ai-chat-column">
+                                <div class="ai-conversation-column">
+                                    <div id="ai-chat-messages" class="ai-chat-messages">
+                                        <div class="ai-report-placeholder"></div>
+                                    </div>
+                                    <div id="ai-suggestion-list" class="ai-suggestion-list" aria-label="推荐问题">
+                                        <button class="ai-suggestion-chip" type="button" data-ai-suggestion="总结今天的工作通知，按待办、进展、风险分类。">今日工作通知</button>
+                                        <button class="ai-suggestion-chip" type="button" data-ai-suggestion="从最近一周的历史输入和通知里提取需要跟进的人和事项。">本周待跟进</button>
+                                        <button class="ai-suggestion-chip" type="button" data-ai-suggestion="按项目整理最近一周的输入记录和通知消息，输出项目进展摘要。">项目进展</button>
+                                        <button class="ai-suggestion-chip" type="button" data-ai-suggestion="从今天的通知里提取会议、时间、地点和行动项。">会议行动项</button>
+                                    </div>
+                                    <div class="ai-chat-row">
+                                        <textarea id="ai-chat-input" class="ai-chat-input" rows="2" placeholder="输入问题，例如：总结今天微信通知里的待办"></textarea>
+                                        <button id="create-ai-session-btn" class="btn-small btn-primary">发送</button>
+                                        <button id="stop-ai-session-btn" class="btn-small" style="display:none;">停止</button>
+                                    </div>
+                                    <div id="ai-session-status" class="ai-report-status"></div>
+                                </div>
+                                <div class="ai-tool-column">
+                                    <div class="ai-side-tabs" role="tablist" aria-label="AI 辅助信息">
+                                        <button class="ai-side-tab active" type="button" data-ai-side-tab="tools">工具调用</button>
+                                        <button class="ai-side-tab" type="button" data-ai-side-tab="references">引用记录</button>
+                                        <button class="ai-side-tab" type="button" data-ai-side-tab="exports">导出文件</button>
+                                    </div>
+                                    <div class="ai-side-panel active" data-ai-side-panel="tools">
+                                        <div id="ai-tool-call-list" class="ai-tool-call-list"></div>
+                                    </div>
+                                    <div class="ai-side-panel" data-ai-side-panel="references">
+                                        <div id="ai-reference-list" class="ai-reference-list"></div>
+                                    </div>
+                                    <div class="ai-side-panel" data-ai-side-panel="exports">
+                                        <div id="ai-exported-file-list" class="ai-reference-list"></div>
+                                    </div>
+                                </div>
+                            </div>
                         </div>
                     </div>
 
                     <div id="ai-config-card" class="ai-config-card" style="display:none;">
                         <div class="ai-card-header">
-                            <div>
-                                <div class="ai-card-title">OpenAI / DeepSeek 报告配置</div>
-                            </div>
+                            <div class="ai-card-title">AI 设置</div>
                             <button id="save-openai-config-btn" class="btn-small">保存配置</button>
                         </div>
                         <div class="ai-config-grid">
@@ -154,62 +274,70 @@
                                 <input id="openai-model-name" type="text" placeholder="gpt-5-mini / deepseek-chat">
                             </label>
                         </div>
-                        <div class="ai-template-hint">
-                            OpenAI 默认使用 <code>/v1/responses</code>；DeepSeek 可填写
-                            <code>https://api.deepseek.com</code> 或 <code>https://api.deepseek.com/v1</code>，
-                            模型可填 <code>deepseek-chat</code>、<code>deepseek-reasoner</code> 或
-                            <code>deepseek-v4-flash</code>。
-                            阿里云百炼兼容模式可填写
-                            <code>https://dashscope.aliyuncs.com/compatible-mode/v1</code>，程序会自动补全到
-                            <code>/chat/completions</code>。
-                        </div>
-                        <div class="ai-template-grid">
-                            <label class="ai-field">
-                                <span>周报模板</span>
-                                <textarea id="weekly-prompt-template" rows="9"></textarea>
-                            </label>
-                            <label class="ai-field">
-                                <span>月报模板</span>
-                                <textarea id="monthly-prompt-template" rows="9"></textarea>
-                            </label>
-                            <label class="ai-field">
-                                <span>季报模板</span>
-                                <textarea id="quarterly-prompt-template" rows="9"></textarea>
-                            </label>
-                            <label class="ai-field">
-                                <span>半年报模板</span>
-                                <textarea id="half-year-prompt-template" rows="9"></textarea>
-                            </label>
-                            <label class="ai-field">
-                                <span>年报模板</span>
-                                <textarea id="yearly-prompt-template" rows="9"></textarea>
-                            </label>
-                        </div>
-                        <div class="ai-template-hint">
-                            可用占位符：<code>{{period_label}}</code>、<code>{{start_date}}</code>、
-                            <code>{{end_date}}</code>、<code>{{record_count}}</code>、<code>{{records}}</code>
-                        </div>
-                    </div>
-
-                    <div class="ai-output-card">
-                        <div class="ai-card-header">
-                            <div class="ai-card-title">生成结果</div>
-                            <div class="ai-output-actions">
-                                <button id="export-ai-report-word-btn" class="btn-small">导出 Word</button>
-                                <button id="copy-ai-report-btn" class="btn-small">复制 Markdown</button>
+                        <div class="ai-settings-split">
+                            <div>
+                                <div class="ai-section-label">Skills（LLM 自动选择，点击仅编辑）</div>
+                                <div id="ai-skills-list" class="ai-skills-list"></div>
                             </div>
-                        </div>
-                        <div class="ai-output-toolbar">
-                            <span class="ai-output-label">Markdown 预览</span>
-                            <button id="copy-ai-report-inline-btn" class="btn-small">复制</button>
-                        </div>
-                        <div id="ai-report-output" class="ai-report-output">
-                            <div class="ai-report-placeholder">报告将在这里实时显示。</div>
+                            <div class="ai-skill-editor">
+                                <label class="ai-field">
+                                    <span>名称</span>
+                                    <input id="ai-skill-name" type="text">
+                                </label>
+                                <label class="ai-field">
+                                    <span>说明</span>
+                                    <input id="ai-skill-description" type="text">
+                                </label>
+                                <label class="ai-field">
+                                    <span>输入参数 JSON</span>
+                                    <textarea id="ai-skill-input-schema" rows="4" placeholder='例如 {"required":["search"],"optional":["source_app","tag"]}'></textarea>
+                                </label>
+                                <label class="ai-field">
+                                    <span>模板</span>
+                                    <textarea id="ai-skill-template" rows="7"></textarea>
+                                </label>
+                                <label class="ai-field">
+                                    <span>默认周期</span>
+                                    <select id="ai-skill-period">
+                                        <option value="custom">自定义</option>
+                                        <option value="day">本日</option>
+                                        <option value="week">本周</option>
+                                        <option value="month">本月</option>
+                                        <option value="quarter">本季</option>
+                                        <option value="half_year">本半年</option>
+                                        <option value="year">本年</option>
+                                    </select>
+                                </label>
+                                <label class="ai-field">
+                                    <span>默认筛选 JSON</span>
+                                    <textarea id="ai-skill-default-filters" rows="4" placeholder='例如 {"content_type":"notification","source_app":"微信"}'></textarea>
+                                </label>
+                                <label class="ai-field">
+                                    <span>输出格式要求</span>
+                                    <textarea id="ai-skill-output-format" rows="4" placeholder="例如 Markdown 表格：事项、来源、截止时间、优先级"></textarea>
+                                </label>
+                                <label class="ai-field ai-checkbox-field">
+                                    <input id="ai-skill-enabled" type="checkbox">
+                                    <span>启用 Skill</span>
+                                </label>
+                                <div class="ai-skill-actions">
+                                    <button id="save-ai-skill-btn" class="btn-small">保存 Skill</button>
+                                    <button id="export-ai-skills-btn" class="btn-small">导出 Skills</button>
+                                    <button id="import-ai-skills-btn" class="btn-small">导入 Skills</button>
+                                </div>
+                                <div id="ai-skill-import-box" class="ai-skill-import-box" style="display:none;">
+                                    <textarea id="ai-skill-import-text" rows="5" placeholder="粘贴 Skills JSON"></textarea>
+                                    <div class="ai-skill-actions">
+                                        <button id="confirm-import-ai-skills-btn" class="btn-small btn-primary">确认导入</button>
+                                        <button id="cancel-import-ai-skills-btn" class="btn-small">取消</button>
+                                    </div>
+                                </div>
+                            </div>
                         </div>
                     </div>
                 </div>
 
-                <div class="desktop-text-panel">
+                <div class="desktop-text-panel workspace-panel" data-history-only data-history-tool>
                     <div class="desktop-text-header">
                         <div>
                             <div class="desktop-text-title">文字工作区</div>
@@ -231,11 +359,11 @@
                     </div>
                 </div>
 
-                <div id="history-list" class="history-list">
+                <div id="history-list" class="history-list workspace-panel" data-history-only>
                     <div class="history-empty" id="history-empty">等待手机发送文字，或在上方直接新增...</div>
                 </div>
 
-                <div id="history-pagination" class="history-pagination" style="display:none;">
+                <div id="history-pagination" class="history-pagination workspace-panel" data-history-only style="display:none;">
                     <span id="history-page-hint" class="history-page-hint"></span>
                     <button id="load-more-history-btn" class="btn-small">加载更多</button>
                 </div>
@@ -243,6 +371,18 @@
         </div>
     </div>
 
-    <script src="main.js"></script>
+    <div id="toast-container" class="toast-container" aria-live="polite" aria-atomic="true"></div>
+    <div id="confirm-modal" class="confirm-modal" style="display:none;" role="dialog" aria-modal="true" aria-labelledby="confirm-modal-title">
+        <div class="confirm-dialog">
+            <div id="confirm-modal-title" class="confirm-title">确认操作</div>
+            <div id="confirm-modal-message" class="confirm-message"></div>
+            <div class="confirm-actions">
+                <button id="confirm-cancel-btn" class="btn-small">取消</button>
+                <button id="confirm-ok-btn" class="btn-small btn-primary">确认</button>
+            </div>
+        </div>
+    </div>
+
+    <script type="module" src="main.js"></script>
 </body>
 </html>

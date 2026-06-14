@@ -18,22 +18,35 @@ class AppUpdateManager(private val context: Context) {
     private val gson = Gson()
     private val client = OkHttpClient()
     private val configManager = ConfigManager(context)
+    private var lastUpdateBase: String? = null
+
+    companion object {
+        private const val RELEASE_SERVER_URL = "wss://8.153.163.104:16908"
+    }
 
     suspend fun checkUpdate(): AppUpdateInfo = withContext(Dispatchers.IO) {
-        val base = normalizeBase(configManager.getServerUrl())
         val version = context.packageManager.getPackageInfo(context.packageName, 0).versionName ?: "0.0.0"
-        val url = "$base/api/updates/check?device_type=android&platform=android&arch=universal&version=$version&channel=stable"
-        val req = Request.Builder().url(url).build()
-        client.newCall(req).execute().use { resp ->
-            val body = resp.body?.string() ?: error("empty response")
-            if (!resp.isSuccessful) error(body)
-            gson.fromJson(body, AppUpdateInfo::class.java)
+        val errors = mutableListOf<String>()
+        for (base in updateBases()) {
+            val url = "$base/api/updates/check?device_type=android&platform=android&arch=universal&version=$version&channel=stable"
+            val req = Request.Builder().url(url).build()
+            try {
+                client.newCall(req).execute().use { resp ->
+                    val body = resp.body?.string() ?: error("empty response")
+                    if (!resp.isSuccessful) error(body)
+                    lastUpdateBase = base
+                    return@withContext gson.fromJson(body, AppUpdateInfo::class.java)
+                }
+            } catch (error: Exception) {
+                errors += "$base: ${error.message ?: "unknown error"}"
+            }
         }
+        error(errors.joinToString("; ").ifBlank { "update check failed" })
     }
 
     suspend fun downloadApk(info: AppUpdateInfo): File = withContext(Dispatchers.IO) {
         val asset = info.asset ?: error("missing update asset")
-        val base = normalizeBase(configManager.getServerUrl())
+        val base = lastUpdateBase ?: normalizeBase(RELEASE_SERVER_URL)
         val downloadUrl = if (asset.downloadUrl.startsWith("http://") || asset.downloadUrl.startsWith("https://")) {
             asset.downloadUrl
         } else {
@@ -64,6 +77,13 @@ class AppUpdateManager(private val context: Context) {
             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
         }
         context.startActivity(intent)
+    }
+
+    private fun updateBases(): List<String> {
+        return listOf(
+            normalizeBase(RELEASE_SERVER_URL),
+            normalizeBase(configManager.getServerUrl())
+        ).distinct()
     }
 
     private fun normalizeBase(serverUrl: String): String {

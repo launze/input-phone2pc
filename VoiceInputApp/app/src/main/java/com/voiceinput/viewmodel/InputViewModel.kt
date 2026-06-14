@@ -8,17 +8,29 @@ import androidx.lifecycle.viewModelScope
 import com.voiceinput.BuildConfig
 import com.google.gson.Gson
 import com.google.gson.JsonObject
+import com.voiceinput.data.AiAssistantFormatter
+import com.voiceinput.data.AiAssistantMessage
+import com.voiceinput.data.AiAssistantReducer
+import com.voiceinput.data.AiAssistantState
+import com.voiceinput.data.AiAssistantToolEvent
 import com.voiceinput.data.ConfigManager
+import com.voiceinput.data.HistoryExportFormatter
+import com.voiceinput.data.InputHistoryScope
+import com.voiceinput.data.RelayAckState
 import com.voiceinput.data.model.ClipboardImagePayload
 import com.voiceinput.data.model.ClipboardFilePayload
 import com.voiceinput.data.model.Device
 import com.voiceinput.data.model.HistoryItem
+import com.voiceinput.data.model.NotificationData
 import com.voiceinput.data.model.ServerConfig
 import com.voiceinput.data.model.ServerDeviceInfo
 import com.voiceinput.data.model.SyncStatus
 import com.voiceinput.data.repository.HistoryRepository
 import com.voiceinput.network.NetworkManager
 import com.voiceinput.network.ServerConnection
+import com.voiceinput.service.NotificationForwarding
+import com.voiceinput.service.NotificationListenerService
+import com.voiceinput.service.VoiceInputForegroundService
 import com.voiceinput.util.ImageTransferCodec
 import com.voiceinput.util.FileTransferCodec
 import kotlinx.coroutines.Dispatchers
@@ -82,7 +94,10 @@ class InputViewModel(application: Application) : AndroidViewModel(application) {
     private val _historyInitialLoaded = MutableStateFlow(false)
     val historyInitialLoaded: StateFlow<Boolean> = _historyInitialLoaded.asStateFlow()
 
-    private val _inputText = MutableStateFlow("")
+    private val _aiAssistantState = MutableStateFlow(AiAssistantState())
+    val aiAssistantState: StateFlow<AiAssistantState> = _aiAssistantState.asStateFlow()
+
+    private val _inputText = MutableStateFlow(configManager.getInputDraft())
     val inputText: StateFlow<String> = _inputText.asStateFlow()
 
     private val _discoveredDevices = MutableStateFlow<List<Device>>(emptyList())
@@ -95,11 +110,16 @@ class InputViewModel(application: Application) : AndroidViewModel(application) {
         MutableStateFlow<Map<String, ConfigManager.PairedDevice>>(emptyMap())
     val pairedDevices: StateFlow<Map<String, ConfigManager.PairedDevice>> = _pairedDevices.asStateFlow()
 
+    private val _lastTargetDevice =
+        MutableStateFlow<ConfigManager.LastTargetDevice?>(configManager.getLastTargetDevice())
+    val lastTargetDevice: StateFlow<ConfigManager.LastTargetDevice?> = _lastTargetDevice.asStateFlow()
+
     private var relayTargetDeviceId: String? = null
     private var relayTargetDeviceName: String? = null
     private var pendingScannedPair: PendingScannedPair? = null
     private var heartbeatJob: Job? = null
     private var deviceListRefreshJob: Job? = null
+    private var pendingAiRequestId: String? = null
 
     init {
         refreshPairedDevices()
@@ -130,7 +150,17 @@ class InputViewModel(application: Application) : AndroidViewModel(application) {
             }
         }
 
+        viewModelScope.launch {
+            connectionStatus.collect { status ->
+                configManager.saveForegroundConnectionStatus(status.connected, status.deviceName)
+                if (configManager.isNotificationEnabled()) {
+                    VoiceInputForegroundService.start(application.applicationContext)
+                }
+            }
+        }
+
         registerServerCallbacks()
+        registerNotificationCallbacks()
 
         if (configManager.isServerModeEnabled()) {
             val url = configManager.getServerUrl()
@@ -144,19 +174,108 @@ class InputViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    override fun onCleared() {
+        super.onCleared()
+        NotificationListenerService.onNotificationReceived = null
+    }
+
+    private fun registerNotificationCallbacks() {
+        NotificationListenerService.onNotificationReceived = { notification ->
+            handleNotificationReceived(notification)
+        }
+    }
+
+    private fun handleNotificationReceived(notification: NotificationData) {
+        if (!configManager.isNotificationEnabled()) {
+            return
+        }
+
+        viewModelScope.launch {
+            val title = notification.title.trim()
+            val text = notification.text.trim()
+            if (!configManager.shouldForwardNotification(
+                    appPackage = notification.appPackage,
+                    title = title,
+                    text = text,
+                    isOngoing = notification.isOngoing,
+                    importance = notification.importance
+                )
+            ) {
+                addLog("通知已按规则过滤: ${notification.appName}")
+                return@launch
+            }
+
+            val safeNotification = NotificationForwarding.safeNotification(configManager, notification)
+            val forwardMode = configManager.getNotificationForwardMode()
+            val item = createHistoryItem(
+                text = NotificationForwarding.historyContent(safeNotification),
+                targetDeviceId = relayTargetDeviceId.orEmpty(),
+                targetDeviceName = relayTargetDeviceName.orEmpty(),
+                contentType = "notification",
+                channel = "notification",
+                syncStatus = SyncStatus.PENDING,
+                sourceApp = safeNotification.appName,
+                sourcePackage = safeNotification.appPackage,
+                metadata = NotificationForwarding.historyMetadata(
+                    safeNotification.copy(forwardMode = forwardMode)
+                )
+            )
+            addHistoryItem(item)
+
+            if (forwardMode == "history_only") {
+                updateHistoryItem(item.id) { history ->
+                    history.copy(
+                        syncStatus = SyncStatus.STORED,
+                        errorMessage = "通知仅保存到手机历史"
+                    )
+                }
+                addLog("通知仅保存到手机历史: ${safeNotification.appName}")
+                _uiMessages.tryEmit("已保存通知：${safeNotification.appName}")
+                return@launch
+            }
+
+            when {
+                relayTargetDeviceId != null && serverConnection.isConnected() ->
+                    sendNotificationViaRelay(safeNotification, item.id, forwardMode)
+
+                networkManager.isConnected.value ->
+                    sendNotificationViaLan(safeNotification, item.id, forwardMode)
+
+                else -> {
+                    updateHistoryItem(item.id) { history ->
+                        history.copy(
+                            syncStatus = SyncStatus.STORED,
+                            errorMessage = "电脑未连接，已在手机暂存"
+                        )
+                    }
+                    addLog("已暂存通知，电脑连接后可继续同步: ${safeNotification.appName}")
+                    _uiMessages.tryEmit("已记录通知：${safeNotification.appName}")
+                }
+            }
+        }
+    }
+
     private fun registerServerCallbacks() {
         serverConnection.onRelayMessageReceived = { fromDeviceId, payload ->
             Log.d(TAG, "Relay message from $fromDeviceId: $payload")
-            if (payload.get("type")?.asString == "INPUT_ACK") {
-                handleRelayAck(fromDeviceId, payload)
+            when (payload.get("type")?.asString) {
+                "INPUT_ACK" -> handleRelayAck(fromDeviceId, payload)
+                "AI_ASSISTANT_DELTA" -> handleAiAssistantDelta(payload)
+                "AI_ASSISTANT_EVENT" -> handleAiAssistantEvent(payload)
+                "AI_ASSISTANT_RESPONSE" -> handleAiAssistantResponse(fromDeviceId, payload)
             }
         }
 
-        serverConnection.onRelayStored = { messageId, toDeviceId, storedAt, queued ->
+        serverConnection.onRelayStored = { messageId, toDeviceId, storedAt, queued, clientMessageId ->
             viewModelScope.launch {
                 val targetName =
                     relayTargetDeviceName ?: pairedDevices.value[toDeviceId]?.deviceName ?: toDeviceId
-                val localHistoryId = takePendingRelayHistoryId()
+                clientMessageId?.takeIf { it.isNotBlank() }?.let {
+                    pendingRelayHistoryIds.remove(it)
+                }
+                val localHistoryId = clientMessageId
+                    ?.takeIf { it.isNotBlank() }
+                    ?: takePendingRelayHistoryId()
                     ?: _visibleHistoryItems.value.lastOrNull {
                         it.channel == "server" &&
                             it.targetDeviceId == toDeviceId &&
@@ -172,11 +291,12 @@ class InputViewModel(application: Application) : AndroidViewModel(application) {
 
                 if (localHistoryId != null) {
                     updateHistoryItem(localHistoryId) { item ->
-                        item.copy(
-                            serverMessageId = messageId,
-                            storedAt = if (queued) storedAt else null,
-                            syncStatus = if (queued) SyncStatus.STORED else SyncStatus.PENDING,
-                            errorMessage = null
+                        RelayAckState.applyStoredAck(
+                            item = item,
+                            messageId = messageId,
+                            toDeviceId = toDeviceId,
+                            storedAt = storedAt,
+                            queued = queued
                         )
                     }
                 }
@@ -208,14 +328,16 @@ class InputViewModel(application: Application) : AndroidViewModel(application) {
                                 deviceName = pending.deviceName,
                                 deviceType = "desktop",
                                 localIp = pending.localIp,
-                                localPort = pending.localPort
+                                localPort = pending.localPort,
+                                lastConnectedAt = System.currentTimeMillis()
                             )
                             pendingScannedPair = null
                         } else {
                             configManager.savePairedDevice(
                                 deviceId = otherId,
                                 deviceName = otherName.ifBlank { "Desktop" },
-                                deviceType = "desktop"
+                                deviceType = "desktop",
+                                lastConnectedAt = System.currentTimeMillis()
                             )
                         }
                         refreshPairedDevices()
@@ -239,7 +361,8 @@ class InputViewModel(application: Application) : AndroidViewModel(application) {
             configManager.savePairedDevice(
                 deviceId = deviceId,
                 deviceName = deviceName,
-                deviceType = deviceType
+                deviceType = deviceType,
+                lastConnectedAt = System.currentTimeMillis()
             )
             refreshPairedDevices()
             if (relayTargetDeviceId == null || relayTargetDeviceId == deviceId) {
@@ -283,15 +406,33 @@ class InputViewModel(application: Application) : AndroidViewModel(application) {
         val contentType = payload.get("content_type")?.asString ?: "text"
         val success = payload.get("success")?.asBoolean ?: false
         val serverMessageId = payload.get("server_message_id")?.asString
+        val clientMessageId = payload.get("client_message_id")?.takeIf { !it.isJsonNull }?.asString
 
         viewModelScope.launch {
-            if (serverMessageId != null) {
+            val now = System.currentTimeMillis()
+            val updatedByClientId = clientMessageId
+                ?.takeIf { it.isNotBlank() }
+                ?.let { itemId ->
+                    updateHistoryItem(itemId) { item ->
+                        RelayAckState.applyInputAck(
+                            item = item,
+                            serverMessageId = serverMessageId,
+                            fromDeviceId = fromDeviceId,
+                            success = success,
+                            now = now
+                        )
+                    }
+                    true
+                } ?: false
+
+            if (!updatedByClientId && serverMessageId != null) {
                 val updated = historyRepository.updateHistoryByServerMessageId(serverMessageId) { item ->
-                    item.copy(
-                        syncStatus = if (success) SyncStatus.SYNCED else SyncStatus.FAILED,
-                        syncedAt = if (success) System.currentTimeMillis() else item.syncedAt,
-                        storedAt = if (success) null else item.storedAt,
-                        errorMessage = if (success) null else "电脑处理失败，请稍后重试"
+                    RelayAckState.applyInputAck(
+                        item = item,
+                        serverMessageId = serverMessageId,
+                        fromDeviceId = fromDeviceId,
+                        success = success,
+                        now = now
                     )
                 }
                 updated?.let { replaceHistoryItemInState(it) }
@@ -301,12 +442,266 @@ class InputViewModel(application: Application) : AndroidViewModel(application) {
                 when (contentType) {
                     "image" -> addLog("电脑已接收图片 from $fromDeviceId")
                     "file" -> addLog("电脑已保存文件 from $fromDeviceId")
+                    "notification" -> addLog("电脑已记录通知 from $fromDeviceId")
                     else -> addLog("电脑已接收文本 from $fromDeviceId")
                 }
             } else {
                 addLog("电脑处理失败 from $fromDeviceId")
             }
         }
+    }
+
+    fun askAiAssistant(
+        question: String,
+        filters: JsonObject? = null,
+        continueCurrentSession: Boolean = true
+    ) {
+        val normalized = question.trim()
+        if (normalized.isBlank()) {
+            _uiMessages.tryEmit("请输入要询问 AI 助手的问题")
+            return
+        }
+        val targetId = relayTargetDeviceId
+        val targetName = relayTargetDeviceName ?: targetId.orEmpty()
+        if (targetId.isNullOrBlank() || !serverConnection.isConnected()) {
+            _aiAssistantState.value = _aiAssistantState.value.copy(
+                loading = false,
+                error = "需要先通过服务器中转连接到电脑",
+                status = "未连接电脑"
+            )
+            _uiMessages.tryEmit("请先连接服务器并选择电脑")
+            return
+        }
+
+        val requestId = "app-ai-${System.currentTimeMillis()}-${(1000..9999).random()}"
+        val payload = JsonObject().apply {
+            addProperty("type", "AI_ASSISTANT_REQUEST")
+            addProperty("request_id", requestId)
+            addProperty("question", normalized)
+            filters?.let { add("filters", it) }
+            if (continueCurrentSession) {
+                _aiAssistantState.value.sessionId?.let { addProperty("session_id", it) }
+            }
+            addProperty("timestamp", System.currentTimeMillis())
+        }
+        pendingAiRequestId = requestId
+        val userMessage = AiAssistantMessage(
+            id = "$requestId-user",
+            role = "user",
+            content = normalized,
+            timestamp = System.currentTimeMillis()
+        )
+        val assistantPlaceholder = AiAssistantMessage(
+            id = "$requestId-assistant",
+            role = "assistant",
+            content = "",
+            timestamp = System.currentTimeMillis(),
+            streaming = true
+        )
+        val existingMessages = if (continueCurrentSession) {
+            _aiAssistantState.value.messages
+        } else {
+            emptyList()
+        }
+        _aiAssistantState.value = _aiAssistantState.value.copy(
+            question = normalized,
+            sessionId = if (continueCurrentSession) _aiAssistantState.value.sessionId else null,
+            messages = existingMessages + userMessage + assistantPlaceholder,
+            toolEvents = emptyList(),
+            loading = true,
+            error = null,
+            status = "已发送到 $targetName，等待 PC AI 助手返回"
+        )
+
+        if (serverConnection.sendRelayMessage(targetId, payload)) {
+            addLog("已发送 AI 请求到 $targetName")
+        } else {
+            pendingAiRequestId = null
+            val failedMessages = _aiAssistantState.value.messages.map { message ->
+                if (message.id == "$requestId-assistant") {
+                    message.copy(streaming = false)
+                } else {
+                    message
+                }
+            }
+            _aiAssistantState.value = _aiAssistantState.value.copy(
+                messages = failedMessages,
+                loading = false,
+                error = "AI 请求发送失败",
+                status = "发送失败"
+            )
+            addLog("AI 请求发送失败")
+        }
+    }
+
+    fun cancelAiAssistant() {
+        val requestId = pendingAiRequestId
+        val targetId = relayTargetDeviceId
+        if (requestId.isNullOrBlank() || targetId.isNullOrBlank()) {
+            _aiAssistantState.value = _aiAssistantState.value.copy(
+                loading = false,
+                status = "没有正在生成的 AI 请求"
+            )
+            return
+        }
+
+        val payload = JsonObject().apply {
+            addProperty("type", "AI_ASSISTANT_CANCEL")
+            addProperty("request_id", requestId)
+            addProperty("timestamp", System.currentTimeMillis())
+        }
+        val sent = serverConnection.sendRelayMessage(targetId, payload)
+        val updatedMessages = _aiAssistantState.value.messages.map { message ->
+            if (message.id == "$requestId-assistant") {
+                message.copy(streaming = false)
+            } else {
+                message
+            }
+        }
+        _aiAssistantState.value = _aiAssistantState.value.copy(
+            messages = updatedMessages,
+            loading = false,
+            status = if (sent) "已请求 PC 停止本次生成" else "停止请求发送失败",
+            error = if (sent) null else "停止请求发送失败"
+        )
+        if (sent) {
+            addLog("已请求停止 PC AI 助手生成")
+        } else {
+            addLog("停止 PC AI 助手生成失败")
+        }
+    }
+
+    fun startNewAiAssistantSession() {
+        pendingAiRequestId = null
+        _aiAssistantState.value = AiAssistantState(
+            status = "已开始新会话，下一次提问不会沿用上一轮 PC AI 上下文"
+        )
+    }
+
+    fun requestAiAssistantWordExport() {
+        val latestAnswer = _aiAssistantState.value.messages
+            .lastOrNull { it.role != "user" && it.content.isNotBlank() }
+            ?.content
+            ?.trim()
+        if (latestAnswer.isNullOrBlank()) {
+            _uiMessages.tryEmit("没有可导出 Word 的 AI 回答")
+            return
+        }
+
+        val question = AiAssistantFormatter.buildWordExportRequest()
+        askAiAssistant(question, continueCurrentSession = true)
+    }
+
+    private fun handleAiAssistantResponse(fromDeviceId: String, payload: JsonObject) {
+        val requestId = payload.get("request_id")?.asString
+        if (!shouldAcceptAiAssistantPayload(requestId)) {
+            return
+        }
+        val success = payload.get("success")?.asBoolean ?: false
+        viewModelScope.launch {
+            if (success) {
+                val answer = payload.get("content")?.asString.orEmpty()
+                val sessionId = payload.get("session_id")?.asString
+                val recordCount = payload.get("record_count")?.asInt ?: 0
+                val exportedFilePath = payload.getAsJsonObject("exported_file")
+                    ?.get("saved_path")
+                    ?.takeIf { !it.isJsonNull }
+                    ?.asString
+                    ?.takeIf { it.isNotBlank() }
+                val reduction = AiAssistantReducer.applyResponseSuccess(
+                    state = _aiAssistantState.value,
+                    requestId = requestId,
+                    answer = answer,
+                    sessionId = sessionId,
+                    recordCount = recordCount,
+                    exportedFilePath = exportedFilePath,
+                    timestamp = System.currentTimeMillis()
+                )
+                _aiAssistantState.value = reduction.state
+                addLog("收到 PC AI 助手回答 from $fromDeviceId")
+            } else {
+                val error = payload.get("error")?.asString ?: "AI 助手执行失败"
+                val reduction = AiAssistantReducer.applyResponseFailure(
+                    state = _aiAssistantState.value,
+                    requestId = requestId,
+                    error = error
+                )
+                _aiAssistantState.value = reduction.state
+                addLog("PC AI 助手执行失败: $error")
+            }
+            pendingAiRequestId = null
+        }
+    }
+
+    private fun handleAiAssistantDelta(payload: JsonObject) {
+        val requestId = payload.get("request_id")?.asString ?: return
+        if (!shouldAcceptAiAssistantPayload(requestId)) return
+        val delta = payload.get("delta")?.asString.orEmpty()
+        if (delta.isBlank()) return
+        viewModelScope.launch {
+            _aiAssistantState.value = AiAssistantReducer.applyDelta(
+                state = _aiAssistantState.value,
+                requestId = requestId,
+                delta = delta
+            )
+        }
+    }
+
+    private fun handleAiAssistantEvent(payload: JsonObject) {
+        val requestId = payload.get("request_id")?.asString ?: return
+        if (!shouldAcceptAiAssistantPayload(requestId)) return
+        val event = payload.get("event")?.asString.orEmpty()
+        if (event.isBlank()) return
+        val toolName = payload.get("tool_name")?.asString.orEmpty()
+        val message = payload.get("message")?.asString.orEmpty()
+        val toolCallId = payload.get("tool_call_id")?.takeIf { !it.isJsonNull }?.asString.orEmpty()
+        val sessionId = payload.get("session_id")?.takeIf { !it.isJsonNull }?.asString
+        val data = payload.getAsJsonObject("data")
+        val recordCount = data?.get("record_count")?.takeIf { !it.isJsonNull }?.asInt
+        val exportedFilePath = data
+            ?.getAsJsonObject("exported_file")
+            ?.get("saved_path")
+            ?.takeIf { !it.isJsonNull }
+            ?.asString
+            ?.takeIf { it.isNotBlank() }
+        val status = when (event) {
+            "tool_call_start" -> if (toolName.isNotBlank()) "PC AI 正在调用 $toolName" else "PC AI 正在调用工具"
+            "tool_call_result" -> if (toolName.isNotBlank()) "PC AI 已完成 $toolName" else "PC AI 工具调用完成"
+            "assistant_done" -> if (exportedFilePath.isNullOrBlank()) "PC AI 助手已完成" else "PC AI 助手已完成，已导出 Word"
+            "assistant_error" -> "PC AI 助手执行失败"
+            else -> message.ifBlank { "PC AI 工具事件：$event" }
+        }
+        val eventItem = AiAssistantToolEvent(
+            id = toolCallId.ifBlank { "$requestId-$event-${System.currentTimeMillis()}" },
+            event = event,
+            toolName = toolName,
+            message = message,
+            detail = AiAssistantFormatter.buildToolEventDetail(payload),
+            timestamp = System.currentTimeMillis()
+        )
+        viewModelScope.launch {
+            val reduction = AiAssistantReducer.applyToolEvent(
+                state = _aiAssistantState.value,
+                requestId = requestId,
+                eventItem = eventItem,
+                sessionId = sessionId,
+                recordCount = recordCount,
+                exportedFilePath = exportedFilePath,
+                status = status
+            )
+            _aiAssistantState.value = reduction.state
+            if (reduction.clearPendingRequest) {
+                pendingAiRequestId = null
+            }
+        }
+    }
+
+    private fun shouldAcceptAiAssistantPayload(requestId: String?): Boolean {
+        return AiAssistantReducer.shouldAcceptPayload(
+            state = _aiAssistantState.value,
+            pendingRequestId = pendingAiRequestId,
+            requestId = requestId
+        )
     }
 
     private fun addLog(message: String) {
@@ -323,6 +718,17 @@ class InputViewModel(application: Application) : AndroidViewModel(application) {
 
     fun refreshPairedDevices() {
         _pairedDevices.value = configManager.getPairedDevices()
+        refreshLastTargetDevice()
+    }
+
+    private fun refreshLastTargetDevice() {
+        _lastTargetDevice.value = configManager.getLastTargetDevice()
+    }
+
+    private fun refreshForegroundServiceIfEnabled() {
+        if (configManager.isNotificationEnabled()) {
+            VoiceInputForegroundService.start(getApplication<Application>().applicationContext)
+        }
     }
 
     private fun restoreSelectedRelayDevice() {
@@ -331,6 +737,7 @@ class InputViewModel(application: Application) : AndroidViewModel(application) {
             relayTargetDeviceId = null
             relayTargetDeviceName = null
             _connectionStatus.value = ConnectionStatus(connected = false, deviceName = "")
+            configManager.saveForegroundConnectionStatus(false, "")
             return
         }
 
@@ -351,13 +758,16 @@ class InputViewModel(application: Application) : AndroidViewModel(application) {
             relayTargetDeviceId = null
             relayTargetDeviceName = null
             _connectionStatus.value = ConnectionStatus(connected = false, deviceName = "")
+            configManager.saveForegroundConnectionStatus(false, "")
             return
         }
 
         relayTargetDeviceId = restored.first
         relayTargetDeviceName = restored.second
         configManager.saveLastTargetDevice(restored.first, restored.second)
+        refreshLastTargetDevice()
         syncSelectedRelayDeviceStatus()
+        refreshForegroundServiceIfEnabled()
     }
 
     fun startDiscovery() {
@@ -376,6 +786,7 @@ class InputViewModel(application: Application) : AndroidViewModel(application) {
                     connected = true,
                     deviceName = device.deviceName
                 )
+                configManager.saveForegroundConnectionStatus(true, device.deviceName)
             }
             updateSendAvailability()
         }
@@ -385,8 +796,24 @@ class InputViewModel(application: Application) : AndroidViewModel(application) {
         relayTargetDeviceId = device.deviceId
         relayTargetDeviceName = device.deviceName
         configManager.saveLastTargetDevice(device.deviceId, device.deviceName)
+        refreshLastTargetDevice()
+        configManager.markPairedDeviceConnected(device.deviceId)
+        refreshPairedDevices()
         syncSelectedRelayDeviceStatus()
+        refreshForegroundServiceIfEnabled()
         addLog("已选择服务器设备: ${device.deviceName}")
+        updateSendAvailability()
+    }
+
+    fun selectPairedDeviceAsDefault(deviceId: String, deviceName: String) {
+        relayTargetDeviceId = deviceId
+        relayTargetDeviceName = deviceName
+        configManager.saveLastTargetDevice(deviceId, deviceName)
+        refreshLastTargetDevice()
+        refreshPairedDevices()
+        syncSelectedRelayDeviceStatus()
+        refreshForegroundServiceIfEnabled()
+        addLog("已设为默认电脑: $deviceName")
         updateSendAvailability()
     }
 
@@ -398,11 +825,13 @@ class InputViewModel(application: Application) : AndroidViewModel(application) {
         }
         configManager.removePairedDevice(deviceId)
         refreshPairedDevices()
+        refreshLastTargetDevice()
         if (relayTargetDeviceId == deviceId) {
             relayTargetDeviceId = null
             relayTargetDeviceName = null
             restoreSelectedRelayDevice()
         }
+        refreshForegroundServiceIfEnabled()
         updateSendAvailability()
     }
 
@@ -410,7 +839,10 @@ class InputViewModel(application: Application) : AndroidViewModel(application) {
         relayTargetDeviceId = null
         relayTargetDeviceName = null
         configManager.clearLastTargetDevice()
+        refreshLastTargetDevice()
         _connectionStatus.value = ConnectionStatus(connected = false, deviceName = "")
+        configManager.saveForegroundConnectionStatus(false, "")
+        refreshForegroundServiceIfEnabled()
         updateSendAvailability()
     }
 
@@ -496,7 +928,8 @@ class InputViewModel(application: Application) : AndroidViewModel(application) {
                         deviceName = deviceName,
                         deviceType = "desktop",
                         localIp = localIp,
-                        localPort = localPort
+                        localPort = localPort,
+                        lastConnectedAt = System.currentTimeMillis()
                     )
                     refreshPairedDevices()
                     pendingScannedPair = null
@@ -565,12 +998,14 @@ class InputViewModel(application: Application) : AndroidViewModel(application) {
 
     fun onInputTextChange(text: String) {
         _inputText.value = text
+        configManager.saveInputDraft(text)
     }
 
     fun sendText(pressEnter: Boolean = false) {
         val text = _inputText.value
         if (text.isBlank()) return
         _inputText.value = ""
+        configManager.clearInputDraft()
 
         viewModelScope.launch {
             when {
@@ -579,6 +1014,7 @@ class InputViewModel(application: Application) : AndroidViewModel(application) {
                 else -> {
                     addLog("未连接到任何设备，无法发送")
                     _inputText.value = text
+                    configManager.saveInputDraft(text)
                 }
             }
         }
@@ -832,12 +1268,14 @@ class InputViewModel(application: Application) : AndroidViewModel(application) {
             channel = "server",
             syncStatus = SyncStatus.PENDING
         )
+        payload.addProperty("client_message_id", historyItem.id)
         addHistoryItem(historyItem)
 
+        pendingRelayHistoryIds.addLast(historyItem.id)
         if (serverConnection.sendRelayMessage(targetId, payload)) {
-            pendingRelayHistoryIds.addLast(historyItem.id)
             addLog("已发送文本到 $targetName (中转)")
         } else {
+            pendingRelayHistoryIds.remove(historyItem.id)
             updateHistoryItem(historyItem.id) { item ->
                 item.copy(
                     syncStatus = SyncStatus.FAILED,
@@ -902,15 +1340,18 @@ class InputViewModel(application: Application) : AndroidViewModel(application) {
             targetDeviceName = targetName,
             contentType = "image",
             channel = "server",
-            syncStatus = SyncStatus.PENDING
+            syncStatus = SyncStatus.PENDING,
+            metadata = imageHistoryMetadata(payload)
         )
+        relayPayload.addProperty("client_message_id", historyItem.id)
         addHistoryItem(historyItem)
 
+        pendingRelayHistoryIds.addLast(historyItem.id)
         if (serverConnection.sendRelayMessage(targetId, relayPayload)) {
-            pendingRelayHistoryIds.addLast(historyItem.id)
             addLog("已发送图片到 $targetName (中转)")
             _uiMessages.tryEmit("图片已发送")
         } else {
+            pendingRelayHistoryIds.remove(historyItem.id)
             updateHistoryItem(historyItem.id) { item ->
                 item.copy(
                     syncStatus = SyncStatus.FAILED,
@@ -940,15 +1381,18 @@ class InputViewModel(application: Application) : AndroidViewModel(application) {
             targetDeviceName = targetName,
             contentType = "file",
             channel = "server",
-            syncStatus = SyncStatus.PENDING
+            syncStatus = SyncStatus.PENDING,
+            metadata = fileHistoryMetadata(payload)
         )
+        relayPayload.addProperty("client_message_id", historyItem.id)
         addHistoryItem(historyItem)
 
+        pendingRelayHistoryIds.addLast(historyItem.id)
         if (serverConnection.sendRelayMessage(targetId, relayPayload)) {
-            pendingRelayHistoryIds.addLast(historyItem.id)
             addLog("已发送文件到 $targetName (中转): ${payload.fileName}")
             _uiMessages.tryEmit("文件已发送")
         } else {
+            pendingRelayHistoryIds.remove(historyItem.id)
             updateHistoryItem(historyItem.id) { item ->
                 item.copy(
                     syncStatus = SyncStatus.FAILED,
@@ -960,6 +1404,72 @@ class InputViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    private suspend fun sendNotificationViaRelay(
+        notification: NotificationData,
+        historyItemId: String,
+        forwardMode: String
+    ) {
+        val targetId = relayTargetDeviceId ?: return
+        val targetName = relayTargetDeviceName ?: targetId
+        val relayPayload = NotificationForwarding.relayPayload(notification, forwardMode)
+        relayPayload.addProperty("client_message_id", historyItemId)
+
+        updateHistoryItem(historyItemId) { item ->
+            item.copy(
+                channel = "server",
+                targetDeviceId = targetId,
+                targetDeviceName = targetName
+            )
+        }
+        pendingRelayHistoryIds.addLast(historyItemId)
+        if (serverConnection.sendRelayMessage(targetId, relayPayload)) {
+            addLog("已转发通知到 $targetName (中转): ${notification.appName}")
+            _uiMessages.tryEmit("通知已转发：${notification.appName}")
+        } else {
+            pendingRelayHistoryIds.remove(historyItemId)
+            updateHistoryItem(historyItemId) { item ->
+                item.copy(
+                    syncStatus = SyncStatus.FAILED,
+                    errorMessage = "通知发送失败，未能提交到服务器"
+                )
+            }
+            addLog("通知发送失败: ${notification.appName}")
+            _uiMessages.tryEmit("通知转发失败：${notification.appName}")
+        }
+    }
+
+    private suspend fun sendNotificationViaLan(
+        notification: NotificationData,
+        historyItemId: String,
+        forwardMode: String
+    ) {
+        updateHistoryItem(historyItemId) { item ->
+            item.copy(
+                channel = "lan",
+                targetDeviceName = connectionStatus.value.deviceName.ifBlank { "局域网设备" }
+            )
+        }
+        val success = networkManager.sendNotification(notification.copy(forwardMode = forwardMode))
+        if (success) {
+            updateHistoryItem(historyItemId) { item ->
+                item.copy(
+                    syncStatus = SyncStatus.DIRECT,
+                    syncedAt = System.currentTimeMillis(),
+                    errorMessage = null
+                )
+            }
+            addLog("局域网通知发送成功: ${notification.appName}")
+        } else {
+            updateHistoryItem(historyItemId) { item ->
+                item.copy(
+                    syncStatus = SyncStatus.FAILED,
+                    errorMessage = "局域网通知发送失败"
+                )
+            }
+            addLog("局域网通知发送失败: ${notification.appName}")
+        }
+    }
+
     private suspend fun sendImageViaLan(payload: ClipboardImagePayload) {
         val targetName = connectionStatus.value.deviceName.ifBlank { "局域网设备" }
         val historyItem = createHistoryItem(
@@ -968,7 +1478,8 @@ class InputViewModel(application: Application) : AndroidViewModel(application) {
             targetDeviceName = targetName,
             contentType = "image",
             channel = "lan",
-            syncStatus = SyncStatus.PENDING
+            syncStatus = SyncStatus.PENDING,
+            metadata = imageHistoryMetadata(payload)
         )
         addHistoryItem(historyItem)
 
@@ -998,6 +1509,7 @@ class InputViewModel(application: Application) : AndroidViewModel(application) {
     fun onHistoryItemClick(item: HistoryItem) {
         if (item.contentType == "text") {
             _inputText.value = item.text
+            configManager.saveInputDraft(item.text)
         }
     }
 
@@ -1013,6 +1525,82 @@ class InputViewModel(application: Application) : AndroidViewModel(application) {
                 refreshVisibleHistoryHasMore(updatedVisible)
             }
             pendingRelayHistoryIds.remove(itemId)
+        }
+    }
+
+    fun deleteHistoryItems(itemIds: Set<String>) {
+        if (itemIds.isEmpty()) return
+        viewModelScope.launch {
+            historyRepository.deleteHistoryItems(itemIds)
+            _historyItems.value = _historyItems.value.filter { it.id !in itemIds }
+            val updatedVisible = _visibleHistoryItems.value.filter { it.id !in itemIds }
+            if (updatedVisible.isEmpty()) {
+                loadInitialVisibleHistory(force = true)
+            } else {
+                _visibleHistoryItems.value = updatedVisible
+                refreshVisibleHistoryHasMore(updatedVisible)
+            }
+            pendingRelayHistoryIds.removeAll(itemIds)
+        }
+    }
+
+    fun toggleHistoryFavorite(itemId: String) {
+        viewModelScope.launch {
+            updateHistoryItem(itemId) { item ->
+                item.copy(isFavorite = !item.isFavorite)
+            }
+        }
+    }
+
+    fun toggleHistoryPinned(itemId: String) {
+        viewModelScope.launch {
+            updateHistoryItem(itemId) { item ->
+                item.copy(isPinned = !item.isPinned)
+            }
+        }
+    }
+
+    fun setHistoryItemsFavorite(itemIds: Set<String>, favorite: Boolean) {
+        if (itemIds.isEmpty()) return
+        viewModelScope.launch {
+            historyRepository.updateHistoryItems(itemIds) { item ->
+                item.copy(isFavorite = favorite)
+            }
+            _historyItems.value = _historyItems.value.map { item ->
+                if (item.id in itemIds) item.copy(isFavorite = favorite) else item
+            }
+            _visibleHistoryItems.value = _visibleHistoryItems.value.map { item ->
+                if (item.id in itemIds) item.copy(isFavorite = favorite) else item
+            }
+        }
+    }
+
+    fun setHistoryItemsPinned(itemIds: Set<String>, pinned: Boolean) {
+        if (itemIds.isEmpty()) return
+        viewModelScope.launch {
+            historyRepository.updateHistoryItems(itemIds) { item ->
+                item.copy(isPinned = pinned)
+            }
+            _historyItems.value = _historyItems.value.map { item ->
+                if (item.id in itemIds) item.copy(isPinned = pinned) else item
+            }
+            _visibleHistoryItems.value = _visibleHistoryItems.value.map { item ->
+                if (item.id in itemIds) item.copy(isPinned = pinned) else item
+            }
+        }
+    }
+
+    fun updateHistoryTags(itemId: String, tags: String) {
+        val normalizedTags = tags
+            .split(',', '，', '\n')
+            .map { it.trim().trimStart('#') }
+            .filter { it.isNotEmpty() }
+            .distinct()
+            .joinToString(",")
+        viewModelScope.launch {
+            updateHistoryItem(itemId) { item ->
+                item.copy(tags = normalizedTags)
+            }
         }
     }
 
@@ -1033,7 +1621,7 @@ class InputViewModel(application: Application) : AndroidViewModel(application) {
             return
         }
 
-        val latestItems = historyRepository.loadRecentHistoryPage(HISTORY_PAGE_SIZE)
+        val latestItems = latestInputHistoryPage(HISTORY_PAGE_SIZE)
         _visibleHistoryItems.value = latestItems
         _historyInitialLoaded.value = true
         refreshVisibleHistoryHasMore(latestItems)
@@ -1051,11 +1639,7 @@ class InputViewModel(application: Application) : AndroidViewModel(application) {
 
         _historyLoadingMore.value = true
         return try {
-            val olderItems = historyRepository.loadHistoryBefore(
-                beforeTimestamp = oldestVisibleItem.timestamp,
-                beforeId = oldestVisibleItem.id,
-                limit = HISTORY_PAGE_SIZE
-            )
+            val olderItems = olderInputHistoryPage(oldestVisibleItem, HISTORY_PAGE_SIZE)
 
             if (olderItems.isEmpty()) {
                 _historyHasMore.value = false
@@ -1209,18 +1793,15 @@ class InputViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun buildHistoryExportContent(items: List<HistoryItem>, format: String): String {
-        return when (format.lowercase(Locale.ROOT)) {
-            "md" -> buildHistoryExportMarkdown(items)
-            "csv" -> buildHistoryExportCsv(items)
-            else -> buildHistoryExportText(items)
-        }
+        return HistoryExportFormatter.buildContent(items, format)
     }
 
-    fun suggestedHistoryExportFileName(format: String): String {
+    fun suggestedHistoryExportFileName(format: String, recordMode: String = "history"): String {
         val normalized = format.lowercase(Locale.ROOT)
         val extension = if (normalized in setOf("txt", "md", "csv")) normalized else "txt"
         val timestamp = SimpleDateFormat("yyyyMMdd-HHmmss", Locale.getDefault()).format(Date())
-        return "voice-input-history-$timestamp.$extension"
+        val scope = if (recordMode == "notifications") "notifications" else "history"
+        return "voice-input-$scope-$timestamp.$extension"
     }
 
     fun exportHistory(
@@ -1247,95 +1828,68 @@ class InputViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    private fun buildHistoryExportText(items: List<HistoryItem>): String {
-        val dateFormat = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault())
-        val builder = StringBuilder()
-        builder.appendLine("语音输入助手 - 历史记录")
-        builder.appendLine("导出时间: ${dateFormat.format(Date())}")
-        builder.appendLine("记录数: ${items.size}")
-        builder.appendLine()
-
-        sortedForExport(items).forEachIndexed { index, item ->
-            builder.appendLine("${index + 1}. ${dateFormat.format(Date(item.timestamp))}")
-            builder.appendLine("状态: ${syncStatusLabel(item.syncStatus)}")
-            if (item.targetDeviceName.isNotBlank()) {
-                builder.appendLine("设备: ${item.targetDeviceName}")
-            }
-            builder.appendLine(item.text)
-            builder.appendLine()
-        }
-
-        return builder.toString().trimEnd()
+    fun suggestedAiAssistantExportFileName(): String {
+        val timestamp = SimpleDateFormat("yyyyMMdd-HHmmss", Locale.getDefault()).format(Date())
+        return "voice-input-ai-$timestamp.md"
     }
 
-    private fun buildHistoryExportMarkdown(items: List<HistoryItem>): String {
-        val dateFormat = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault())
-        val builder = StringBuilder()
-        builder.appendLine("# 语音输入助手历史记录")
-        builder.appendLine()
-        builder.appendLine("- 导出时间: ${dateFormat.format(Date())}")
-        builder.appendLine("- 记录数: ${items.size}")
-        builder.appendLine()
-
-        sortedForExport(items).forEachIndexed { index, item ->
-            builder.appendLine("## ${index + 1}. ${dateFormat.format(Date(item.timestamp))}")
-            builder.appendLine()
-            builder.appendLine("- 状态: ${syncStatusLabel(item.syncStatus)}")
-            builder.appendLine("- 通道: ${item.channel}")
-            if (item.targetDeviceName.isNotBlank()) {
-                builder.appendLine("- 设备: ${item.targetDeviceName}")
+    fun exportAiAssistantAnswer(
+        uri: Uri,
+        onResult: (Boolean, String) -> Unit
+    ) {
+        viewModelScope.launch {
+            try {
+                val content = buildAiAssistantExportMarkdown(_aiAssistantState.value)
+                withContext(Dispatchers.IO) {
+                    getApplication<Application>().contentResolver.openOutputStream(uri)?.use { stream ->
+                        OutputStreamWriter(stream, Charsets.UTF_8).use { writer ->
+                            writer.write(content)
+                            writer.flush()
+                        }
+                    } ?: error("无法打开导出文件")
+                }
+                onResult(true, "AI 答案已导出")
+            } catch (e: Exception) {
+                onResult(false, "导出失败: ${e.message ?: "未知错误"}")
             }
-            builder.appendLine()
-            builder.appendLine(item.text)
-            builder.appendLine()
         }
-
-        return builder.toString().trimEnd()
     }
 
-    private fun buildHistoryExportCsv(items: List<HistoryItem>): String {
-        val dateFormat = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault())
-        val builder = StringBuilder()
-        builder.appendLine("id,timestamp,target_device,status,channel,content_type,text")
-        sortedForExport(items).forEach { item ->
-            builder.appendLine(
-                listOf(
-                    item.id,
-                    dateFormat.format(Date(item.timestamp)),
-                    item.targetDeviceName.ifBlank { item.targetDeviceId },
-                    syncStatusLabel(item.syncStatus),
-                    item.channel,
-                    item.contentType,
-                    item.text
-                ).joinToString(",") { escapeCsv(it) }
+    private fun buildAiAssistantExportMarkdown(state: AiAssistantState): String {
+        return AiAssistantFormatter.buildExportMarkdown(
+            AiAssistantFormatter.ExportState(
+                sessionId = state.sessionId,
+                recordCount = state.recordCount,
+                exportedFilePath = state.exportedFilePath,
+                status = state.status,
+                toolEvents = state.toolEvents.map { event ->
+                    AiAssistantFormatter.ToolEvent(
+                        event = event.event,
+                        toolName = event.toolName,
+                        message = event.message,
+                        detail = event.detail,
+                        timestamp = event.timestamp
+                    )
+                },
+                messages = state.messages.map { message ->
+                    AiAssistantFormatter.Message(
+                        role = message.role,
+                        content = message.content,
+                        recordCount = message.recordCount,
+                        exportedFilePath = message.exportedFilePath
+                    )
+                }
             )
-        }
-        return builder.toString().trimEnd()
-    }
-
-    private fun sortedForExport(items: List<HistoryItem>): List<HistoryItem> {
-        return items.sortedBy { it.timestamp }
-    }
-
-    private fun syncStatusLabel(status: SyncStatus): String {
-        return when (status) {
-            SyncStatus.PENDING -> "等待电脑确认"
-            SyncStatus.STORED -> "已暂存"
-            SyncStatus.SYNCED -> "已发送"
-            SyncStatus.FAILED -> "失败"
-            SyncStatus.DIRECT -> "局域网直连"
-        }
-    }
-
-    private fun escapeCsv(value: String): String {
-        return "\"${value.replace("\"", "\"\"")}\""
+        )
     }
 
     private suspend fun addHistoryItem(item: HistoryItem) {
         historyRepository.addHistoryItem(item)
         _historyItems.value = _historyItems.value + item
-        _visibleHistoryItems.value = _visibleHistoryItems.value + item
-        refreshVisibleHistoryHasMore(_visibleHistoryItems.value)
+        if (InputHistoryScope.isInputRecord(item)) {
+            _visibleHistoryItems.value = _visibleHistoryItems.value + item
+            refreshVisibleHistoryHasMore(_visibleHistoryItems.value)
+        }
     }
 
     private suspend fun updateHistoryItem(
@@ -1348,7 +1902,7 @@ class InputViewModel(application: Application) : AndroidViewModel(application) {
         }
         _visibleHistoryItems.value = _visibleHistoryItems.value.map { item ->
             if (item.id == itemId) transform(item) else item
-        }
+        }.filter(InputHistoryScope::isInputRecord)
     }
 
     private fun replaceHistoryItemInState(updated: HistoryItem) {
@@ -1357,15 +1911,27 @@ class InputViewModel(application: Application) : AndroidViewModel(application) {
         }
         _visibleHistoryItems.value = _visibleHistoryItems.value.map { item ->
             if (item.id == updated.id) updated else item
-        }
+        }.filter(InputHistoryScope::isInputRecord)
     }
 
     private suspend fun refreshVisibleHistoryHasMore(items: List<HistoryItem>) {
         val oldestItem = items.firstOrNull()
-        _historyHasMore.value = oldestItem != null && historyRepository.hasHistoryBefore(
-            beforeTimestamp = oldestItem.timestamp,
-            beforeId = oldestItem.id
-        )
+        _historyHasMore.value = oldestItem != null && olderInputHistoryPage(oldestItem, 1).isNotEmpty()
+    }
+
+    private suspend fun latestInputHistoryPage(limit: Int): List<HistoryItem> {
+        if (limit <= 0) return emptyList()
+        return InputHistoryScope.filterInputRecords(historyRepository.loadHistory()).takeLast(limit)
+    }
+
+    private suspend fun olderInputHistoryPage(oldestVisibleItem: HistoryItem, limit: Int): List<HistoryItem> {
+        if (limit <= 0) return emptyList()
+        val inputItems = InputHistoryScope.filterInputRecords(historyRepository.loadHistory())
+        val boundaryIndex = inputItems.indexOfFirst { item ->
+            item.timestamp == oldestVisibleItem.timestamp && item.id == oldestVisibleItem.id
+        }
+        if (boundaryIndex <= 0) return emptyList()
+        return inputItems.subList(maxOf(0, boundaryIndex - limit), boundaryIndex)
     }
 
     private fun createHistoryItem(
@@ -1374,7 +1940,10 @@ class InputViewModel(application: Application) : AndroidViewModel(application) {
         targetDeviceName: String,
         contentType: String,
         channel: String,
-        syncStatus: SyncStatus
+        syncStatus: SyncStatus,
+        sourceApp: String = "",
+        sourcePackage: String = "",
+        metadata: String = ""
     ): HistoryItem {
         val now = System.currentTimeMillis()
         return HistoryItem(
@@ -1385,8 +1954,29 @@ class InputViewModel(application: Application) : AndroidViewModel(application) {
             targetDeviceName = targetDeviceName,
             contentType = contentType,
             syncStatus = syncStatus,
-            channel = channel
+            channel = channel,
+            sourceApp = sourceApp,
+            sourcePackage = sourcePackage,
+            metadata = metadata
         )
+    }
+
+    private fun imageHistoryMetadata(payload: ClipboardImagePayload): String {
+        return JsonObject().apply {
+            addProperty("file_name", payload.fileName)
+            addProperty("mime_type", payload.mimeType)
+            addProperty("width", payload.width)
+            addProperty("height", payload.height)
+            addProperty("size", payload.size)
+        }.toString()
+    }
+
+    private fun fileHistoryMetadata(payload: ClipboardFilePayload): String {
+        return JsonObject().apply {
+            addProperty("file_name", payload.fileName)
+            addProperty("mime_type", payload.mimeType)
+            addProperty("size", payload.size)
+        }.toString()
     }
 
     private fun takePendingRelayHistoryId(): String? {
@@ -1401,6 +1991,7 @@ class InputViewModel(application: Application) : AndroidViewModel(application) {
         val targetId = relayTargetDeviceId
         if (targetId.isNullOrBlank()) {
             _connectionStatus.value = ConnectionStatus(connected = false, deviceName = "")
+            configManager.saveForegroundConnectionStatus(false, "")
             return
         }
 
@@ -1415,10 +2006,12 @@ class InputViewModel(application: Application) : AndroidViewModel(application) {
         val online = serverConnection.isConnected() &&
             serverDevices.value.any { it.deviceId == targetId && it.online }
 
-        _connectionStatus.value = ConnectionStatus(
+        val status = ConnectionStatus(
             connected = online,
             deviceName = buildConnectionName(resolvedName)
         )
+        _connectionStatus.value = status
+        configManager.saveForegroundConnectionStatus(status.connected, status.deviceName)
     }
 
     private fun updateSendAvailability() {
@@ -1431,4 +2024,5 @@ class InputViewModel(application: Application) : AndroidViewModel(application) {
         val connected: Boolean,
         val deviceName: String
     )
+
 }

@@ -448,6 +448,10 @@ async fn handle_message(
                 .get("type")
                 .and_then(|value| value.as_str())
                 .unwrap_or_default();
+            let client_message_id = payload
+                .get("client_message_id")
+                .and_then(|value| value.as_str())
+                .map(|value| value.to_string());
 
             if payload_type == "INPUT_ACK" {
                 if let Some(server_message_id) = payload
@@ -524,6 +528,7 @@ async fn handle_message(
                 to_device_id,
                 stored_at,
                 queued,
+                client_message_id,
             };
             tx.send(Message::Text(stored_response.to_json()?))?;
         }

@@ -3,6 +3,7 @@ package com.voiceinput.network
 import com.voiceinput.data.model.Device
 import com.voiceinput.data.model.ClipboardImagePayload
 import com.voiceinput.data.model.Message
+import com.voiceinput.data.model.NotificationData
 import com.voiceinput.util.EncryptionUtil
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -250,6 +251,32 @@ class NetworkManager {
             height = payload.height,
             size = payload.size,
             timestamp = System.currentTimeMillis()
+        )
+        return sendPayload(message)
+    }
+
+    suspend fun sendNotification(notification: NotificationData): Boolean {
+        val message = Message.NotificationInput(
+            appName = notification.appName,
+            appPackage = notification.appPackage,
+            title = notification.title,
+            text = notification.text,
+            timestamp = notification.timestamp,
+            notificationKey = notification.notificationKey,
+            channelId = notification.channelId,
+            groupKey = notification.groupKey,
+            category = notification.category,
+            subText = notification.subText,
+            bigText = notification.bigText,
+            conversationTitle = notification.conversationTitle,
+            postTime = notification.postTime,
+            isOngoing = notification.isOngoing,
+            isClearable = notification.isClearable,
+            importance = notification.importance,
+            forwardMode = notification.forwardMode,
+            silent = notification.forwardMode == "ai_silent",
+            copyToClipboard = notification.forwardMode == "clipboard",
+            icon = notification.icon
         )
         return sendPayload(message)
     }

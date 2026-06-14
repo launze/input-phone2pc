@@ -39,6 +39,7 @@ import androidx.compose.material.icons.filled.Cloud
 import androidx.compose.material.icons.filled.Computer
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Link
+import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.QrCodeScanner
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Settings
@@ -95,7 +96,9 @@ fun InputScreen(
     onNavigateToSettings: () -> Unit = {},
     onNavigateToScanner: () -> Unit = {},
     onNavigateToFileScanner: () -> Unit = {},
-    onNavigateToHistory: () -> Unit = {}
+    onNavigateToHistory: () -> Unit = {},
+    onNavigateToNotifications: () -> Unit = {},
+    onNavigateToAi: () -> Unit = {}
 ) {
     val connectionStatus by viewModel.connectionStatus.collectAsState()
     val sendAvailable by viewModel.sendAvailable.collectAsState()
@@ -258,10 +261,24 @@ fun InputScreen(
                     }
                 },
                 actions = {
+                    IconButton(onClick = onNavigateToAi) {
+                        Icon(
+                            Icons.Default.Cloud,
+                            contentDescription = "AI 助手",
+                            tint = MaterialTheme.colorScheme.onPrimary
+                        )
+                    }
                     IconButton(onClick = onNavigateToHistory) {
                         Icon(
                             Icons.Default.History,
                             contentDescription = "历史记录",
+                            tint = MaterialTheme.colorScheme.onPrimary
+                        )
+                    }
+                    IconButton(onClick = onNavigateToNotifications) {
+                        Icon(
+                            Icons.Default.Notifications,
+                            contentDescription = "通知记录",
                             tint = MaterialTheme.colorScheme.onPrimary
                         )
                     }
@@ -333,13 +350,17 @@ fun InputScreen(
                         ) {
                             if (sendAvailable) {
                                 Text(
-                                    text = if (connectionStatus.connected) "已连接" else "设备离线",
+                                    text = if (connectionStatus.connected) {
+                                        "已连接到电脑"
+                                    } else {
+                                        "电脑离线，可继续暂存"
+                                    },
                                     style = MaterialTheme.typography.titleMedium,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                                 Text(
                                     text = if (connectionStatus.connected) {
-                                        "在手机上输入文字或发送图片到电脑"
+                                        "用手机输入法输入文字，点击发送后直达电脑"
                                     } else {
                                         "消息会先暂存到服务器，待电脑上线后自动同步"
                                     },
@@ -351,9 +372,9 @@ fun InputScreen(
                                     text = if (pairedDevices.isEmpty()) {
                                         "未配对任何设备"
                                     } else if (connectionStatus.deviceName.isNotBlank()) {
-                                        "已选择设备（离线）"
+                                        "已选择电脑（离线）"
                                     } else {
-                                        "已配对设备"
+                                        "已配对电脑"
                                     },
                                     style = MaterialTheme.typography.titleMedium,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -362,7 +383,7 @@ fun InputScreen(
                                     text = if (pairedDevices.isEmpty()) {
                                         "扫描电脑端二维码完成配对"
                                     } else {
-                                        "等待服务器连接或电脑上线，无需重新扫码"
+                                        "可切换电脑、连接服务器，或等待电脑上线"
                                     },
                                     style = MaterialTheme.typography.bodyMedium,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -461,7 +482,13 @@ fun InputScreen(
                             cameraPermissionLauncher.launch(Manifest.permission.CAMERA)
                         }
                     },
+                    onPasteEmpty = {
+                        coroutineScope.launch {
+                            snackbarHostState.showSnackbar("剪贴板没有可粘贴的文本")
+                        }
+                    },
                     enabled = sendAvailable,
+                    inputEnabled = true,
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(16.dp)

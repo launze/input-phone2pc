@@ -1,16 +1,16 @@
-use crate::storage::config::{AppConfig, OpenAiReportConfig};
-use crate::storage::history::{self, HistoryQuery, HistoryRecord};
+use crate::storage::config::OpenAiConfig;
 use chrono::{Local, TimeZone};
 use docx_rs::*;
 use futures_util::StreamExt;
 use reqwest::header::{ACCEPT, CONTENT_TYPE};
 use serde::Serialize;
 use serde_json::Value;
+use std::collections::HashSet;
+use std::sync::Mutex as StdMutex;
 use std::time::Duration;
 use tauri::Emitter;
 
 const DEFAULT_OPENAI_API_URL: &str = "https://api.openai.com/v1/responses";
-const MAX_REPORT_CONTEXT_CHARS: usize = 120_000;
 const MAX_ERROR_BODY_CHARS: usize = 600;
 const MAX_RESPONSE_PREVIEW_CHARS: usize = 800;
 const A4_WIDTH: u32 = 11906;
@@ -33,21 +33,15 @@ const FIXED_LINE_SPACING: i32 = 560;
 const LIST_INDENT_LEFT: i32 = 840;
 const LIST_HANGING_INDENT: i32 = 360;
 
-#[derive(Debug, Clone, Serialize)]
-pub struct GeneratedReport {
-    pub period: String,
-    pub start_at: i64,
-    pub end_at: i64,
-    pub model_name: String,
-    pub record_count: usize,
-    pub used_record_count: usize,
-    pub content: String,
+lazy_static::lazy_static! {
+    static ref CANCELLED_STREAM_REQUESTS: StdMutex<HashSet<String>> = StdMutex::new(HashSet::new());
 }
 
 #[derive(Clone)]
 pub struct ReportStreamHandle {
     pub app_handle: tauri::AppHandle,
     pub request_id: String,
+    pub event_name: Option<String>,
 }
 
 #[derive(Clone, Serialize)]
@@ -56,47 +50,37 @@ struct ReportStreamDeltaPayload {
     delta: String,
 }
 
-pub async fn generate_openai_report(
-    config: AppConfig,
-    period: &str,
-    start_at: i64,
-    end_at: i64,
-    stream_handle: Option<ReportStreamHandle>,
-) -> Result<GeneratedReport, String> {
-    let openai = config.openai;
-    validate_openai_config(&openai)?;
-
-    let mut records = history::list_records(HistoryQuery {
-        start_at: Some(start_at),
-        end_at: Some(end_at),
-        limit: None,
-        before_received_at: None,
-        before_id: None,
-    })
-    .map_err(|e| e.to_string())?;
-
-    if records.is_empty() {
-        return Err("所选时间范围内没有历史记录，无法生成报告".to_string());
+pub fn cancel_report_stream(request_id: &str) {
+    let normalized = request_id.trim();
+    if normalized.is_empty() {
+        return;
     }
+    if let Ok(mut requests) = CANCELLED_STREAM_REQUESTS.lock() {
+        requests.insert(normalized.to_string());
+    }
+}
 
-    records.sort_by(|left, right| {
-        left.received_at
-            .cmp(&right.received_at)
-            .then_with(|| left.id.cmp(&right.id))
-    });
+pub fn clear_report_stream_cancelled(request_id: &str) {
+    if let Ok(mut requests) = CANCELLED_STREAM_REQUESTS.lock() {
+        requests.remove(request_id.trim());
+    }
+}
 
-    let total_record_count = records.len();
-    let (records_context, used_record_count) = build_records_context(&records);
-    let prompt = build_prompt(
-        period,
-        start_at,
-        end_at,
-        total_record_count,
-        &records_context,
-        &openai,
-    )?;
+pub fn is_report_stream_cancelled(request_id: &str) -> bool {
+    CANCELLED_STREAM_REQUESTS
+        .lock()
+        .map(|requests| requests.contains(request_id.trim()))
+        .unwrap_or(false)
+}
+
+pub async fn generate_openai_text(
+    openai: OpenAiConfig,
+    prompt: &str,
+    system_prompt: &str,
+    stream_handle: Option<ReportStreamHandle>,
+) -> Result<String, String> {
+    validate_openai_config(&openai)?;
     let api_target = resolve_api_target(&openai.api_url);
-
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(120))
         .build()
@@ -106,10 +90,11 @@ pub async fn generate_openai_report(
         .post(&api_target.endpoint)
         .header(ACCEPT, "application/json, text/event-stream")
         .bearer_auth(openai.api_key.trim())
-        .json(&build_api_payload(
+        .json(&build_api_payload_with_system(
             &api_target.protocol,
             &openai.model_name,
-            &prompt,
+            prompt,
+            system_prompt,
         ))
         .send()
         .await
@@ -127,7 +112,7 @@ pub async fn generate_openai_report(
         ));
     }
 
-    let content = parsed_body
+    parsed_body
         .content
         .clone()
         .or_else(|| {
@@ -135,17 +120,7 @@ pub async fn generate_openai_report(
                 extract_response_text(response_json, &api_target.protocol)
             })
         })
-        .ok_or_else(|| build_unparseable_response_error(&api_target, &parsed_body))?;
-
-    Ok(GeneratedReport {
-        period: period.to_string(),
-        start_at,
-        end_at,
-        model_name: openai.model_name,
-        record_count: total_record_count,
-        used_record_count,
-        content,
-    })
+        .ok_or_else(|| build_unparseable_response_error(&api_target, &parsed_body))
 }
 
 pub fn export_report_to_word(
@@ -157,7 +132,7 @@ pub fn export_report_to_word(
 ) -> Result<Vec<u8>, String> {
     let normalized = content.trim();
     if normalized.is_empty() {
-        return Err("当前报告内容为空，无法导出 Word".to_string());
+        return Err("当前导出内容为空，无法导出 Word".to_string());
     }
 
     let mut doc = Docx::new()
@@ -240,7 +215,7 @@ pub fn export_report_to_word(
     Ok(buffer.into_inner())
 }
 
-fn validate_openai_config(config: &OpenAiReportConfig) -> Result<(), String> {
+fn validate_openai_config(config: &OpenAiConfig) -> Result<(), String> {
     if config.api_key.trim().is_empty() {
         return Err("请先填写 AI API Key".to_string());
     }
@@ -248,82 +223,6 @@ fn validate_openai_config(config: &OpenAiReportConfig) -> Result<(), String> {
         return Err("请先填写模型名称".to_string());
     }
     Ok(())
-}
-
-fn build_prompt(
-    period: &str,
-    start_at: i64,
-    end_at: i64,
-    record_count: usize,
-    records_context: &str,
-    openai: &OpenAiReportConfig,
-) -> Result<String, String> {
-    let (period_label, template) = match period {
-        "week" => ("周报", openai.weekly_prompt_template.as_str()),
-        "month" => ("月报", openai.monthly_prompt_template.as_str()),
-        "quarter" => ("季报", openai.quarterly_prompt_template.as_str()),
-        "half_year" => ("半年报", openai.half_year_prompt_template.as_str()),
-        "year" => ("年报", openai.yearly_prompt_template.as_str()),
-        _ => return Err("暂不支持该报告类型".to_string()),
-    };
-
-    if template.trim().is_empty() {
-        return Err(format!("{period_label}模板不能为空"));
-    }
-
-    let replacements = [
-        ("{{period_label}}", period_label),
-        ("{{start_date}}", &format_timestamp(start_at)),
-        ("{{end_date}}", &format_timestamp(end_at)),
-        ("{{record_count}}", &record_count.to_string()),
-        ("{{records}}", records_context),
-    ];
-
-    let mut prompt = template.to_string();
-    for (token, value) in replacements {
-        prompt = prompt.replace(token, value);
-    }
-
-    if !prompt.contains(records_context) {
-        prompt.push_str("\n\n原始记录：\n");
-        prompt.push_str(records_context);
-    }
-
-    Ok(prompt)
-}
-
-fn build_records_context(records: &[HistoryRecord]) -> (String, usize) {
-    let mut lines = Vec::new();
-    let mut total_len = 0usize;
-    let mut used_count = 0usize;
-
-    for (index, record) in records.iter().enumerate() {
-        let line = format!(
-            "[{idx}] 发送={sent_at} | 接收={received_at} | 来源={from_device} | 通道={via} | 模式={mode}\n内容：{content}\n",
-            idx = index + 1,
-            sent_at = format_timestamp(record.sent_at),
-            received_at = format_timestamp(record.received_at),
-            from_device = sanitize_inline_text(&record.from_device_name, &record.from_device_id),
-            via = sanitize_inline_text(&record.via, "未知通道"),
-            mode = sanitize_inline_text(&record.delivery_mode, "live"),
-            content = sanitize_multiline_text(&record.content),
-        );
-
-        if total_len + line.len() > MAX_REPORT_CONTEXT_CHARS {
-            let omitted = records.len().saturating_sub(used_count);
-            lines.push(format!(
-                "... 已省略 {} 条较早记录，避免上下文过长。",
-                omitted
-            ));
-            break;
-        }
-
-        total_len += line.len();
-        lines.push(line);
-        used_count += 1;
-    }
-
-    (lines.join("\n"), used_count)
 }
 
 fn resolve_api_target(api_url: &str) -> ApiTarget {
@@ -437,7 +336,7 @@ fn extract_error_message_from_body(parsed_body: &ParsedApiBody) -> String {
 
 fn build_unparseable_response_error(api_target: &ApiTarget, parsed_body: &ParsedApiBody) -> String {
     let mut message = format!(
-        "AI API 未返回可解析的报告内容。当前请求地址: {}",
+        "AI API 未返回可解析的文本内容。当前请求地址: {}",
         api_target.endpoint
     );
 
@@ -530,7 +429,18 @@ fn should_skip_export_metadata_line(period: &str, line: &str) -> bool {
         .unwrap_or(line)
         .trim();
 
+    let normalized = normalized
+        .strip_prefix("- ")
+        .or_else(|| normalized.strip_prefix("* "))
+        .unwrap_or(normalized)
+        .trim();
+
+    if normalized.starts_with("导出时间：") || normalized.starts_with("导出时间:") {
+        return true;
+    }
+
     match period {
+        "history" => normalized == "语传历史记录" || normalized == "语传通知记录",
         "week" => normalized.starts_with("周报") || normalized.starts_with("工作周报"),
         "month" => normalized.starts_with("月报") || normalized.starts_with("工作月报"),
         "quarter" => {
@@ -770,6 +680,7 @@ async fn read_api_response_body(
     protocol: &ApiProtocol,
     stream_handle: Option<&ReportStreamHandle>,
 ) -> Result<ParsedApiBody, String> {
+    ensure_stream_not_cancelled(stream_handle)?;
     let content_type = response
         .headers()
         .get(CONTENT_TYPE)
@@ -777,13 +688,14 @@ async fn read_api_response_body(
         .unwrap_or("")
         .to_string();
 
-    if content_type.contains("text/event-stream") {
+    if stream_handle.is_some() || content_type.contains("text/event-stream") {
         consume_sse_response_body(response, protocol, stream_handle).await
     } else {
         let response_text = response
             .text()
             .await
             .map_err(|e| format!("读取 AI API 响应失败: {e}"))?;
+        ensure_stream_not_cancelled(stream_handle)?;
         Ok(parse_api_response_body(
             &response_text,
             &content_type,
@@ -844,22 +756,25 @@ async fn consume_sse_response_body(
     let mut state = StreamingParseState::default();
 
     while let Some(chunk) = stream.next().await {
+        ensure_stream_not_cancelled(stream_handle)?;
         let bytes = chunk.map_err(|e| format!("读取 AI API 流式响应失败: {e}"))?;
         let chunk_text = String::from_utf8_lossy(&bytes);
         raw_response.push_str(&chunk_text);
         normalized_buffer.push_str(&chunk_text.replace("\r\n", "\n"));
 
         while let Some((block, rest)) = take_next_sse_block(&normalized_buffer) {
+            ensure_stream_not_cancelled(stream_handle)?;
             process_sse_block(&block, protocol, stream_handle, &mut state);
             normalized_buffer = rest;
         }
     }
 
+    ensure_stream_not_cancelled(stream_handle)?;
     if !normalized_buffer.trim().is_empty() {
         process_sse_block(&normalized_buffer, protocol, stream_handle, &mut state);
     }
 
-    let content = state
+    let mut content = state
         .final_json
         .as_ref()
         .and_then(|response_json| extract_response_text(response_json, protocol))
@@ -870,6 +785,15 @@ async fn consume_sse_response_body(
                 Some(state.content_chunks.join(""))
             }
         });
+    let mut final_json = state.final_json;
+    let mut error_message = state.error_message;
+
+    if content.is_none() && final_json.is_none() && !raw_response.trim().is_empty() {
+        let fallback = parse_api_response_body(&raw_response, "", protocol);
+        content = fallback.content;
+        final_json = fallback.json;
+        error_message = fallback.error_message;
+    }
 
     if let (Some(content), Some(stream_handle)) = (&content, stream_handle) {
         if state.content_chunks.is_empty() && !content.is_empty() {
@@ -878,9 +802,9 @@ async fn consume_sse_response_body(
     }
 
     Ok(ParsedApiBody {
-        json: state.final_json,
+        json: final_json,
         content,
-        error_message: state.error_message,
+        error_message,
         body_preview: response_text_preview(&raw_response),
         transport: ResponseBodyTransport::Sse,
     })
@@ -954,17 +878,29 @@ fn emit_report_stream_delta(stream_handle: &ReportStreamHandle, delta: &str) {
     if delta.is_empty() {
         return;
     }
+    if is_report_stream_cancelled(&stream_handle.request_id) {
+        return;
+    }
 
     stream_handle
         .app_handle
         .emit(
-            "openai_report_delta",
+            stream_handle.event_name.as_deref().unwrap_or("ai_assistant_delta"),
             ReportStreamDeltaPayload {
                 request_id: stream_handle.request_id.clone(),
                 delta: delta.to_string(),
             },
         )
         .unwrap_or(());
+}
+
+fn ensure_stream_not_cancelled(stream_handle: Option<&ReportStreamHandle>) -> Result<(), String> {
+    if let Some(stream_handle) = stream_handle {
+        if is_report_stream_cancelled(&stream_handle.request_id) {
+            return Err("AI 生成已取消".to_string());
+        }
+    }
+    Ok(())
 }
 
 fn looks_like_sse(content_type: &str, response_text: &str) -> bool {
@@ -1183,31 +1119,17 @@ struct ParsedReportLine {
     text: String,
 }
 
-fn sanitize_inline_text(value: &str, fallback: &str) -> String {
-    let trimmed = value.trim();
-    let source = if trimmed.is_empty() {
-        fallback
-    } else {
-        trimmed
-    };
-    source.replace('\n', " ").replace('\r', " ")
-}
-
-fn sanitize_multiline_text(value: &str) -> String {
-    value
-        .lines()
-        .map(str::trim)
-        .filter(|line| !line.is_empty())
-        .collect::<Vec<_>>()
-        .join(" / ")
-}
-
-fn build_api_payload(protocol: &ApiProtocol, model_name: &str, prompt: &str) -> Value {
+fn build_api_payload_with_system(
+    protocol: &ApiProtocol,
+    model_name: &str,
+    prompt: &str,
+    system_prompt: &str,
+) -> Value {
     match protocol {
         ApiProtocol::Responses => serde_json::json!({
             "model": model_name,
             "stream": true,
-            "instructions": "你是一名中文工作总结助手。只能基于用户提供的记录总结，禁止虚构未出现的事项；如信息不足，要直接说明记录未体现。",
+            "instructions": system_prompt,
             "input": prompt,
         }),
         ApiProtocol::ChatCompletions => serde_json::json!({
@@ -1216,7 +1138,7 @@ fn build_api_payload(protocol: &ApiProtocol, model_name: &str, prompt: &str) -> 
             "messages": [
                 {
                     "role": "system",
-                    "content": "你是一名中文工作总结助手。只能基于用户提供的记录总结，禁止虚构未出现的事项；如信息不足，要直接说明记录未体现。"
+                    "content": system_prompt
                 },
                 {
                     "role": "user",
@@ -1365,6 +1287,28 @@ mod tests {
         assert_eq!(
             lines,
             vec!["#### 总览".to_string(), "本周完成了修复。".to_string()]
+        );
+    }
+
+    #[test]
+    fn prepare_report_lines_keeps_history_metadata_summary() {
+        let lines = prepare_report_lines(
+            "history",
+            "# 语传通知记录\n\n- 导出时间: 2026-06-13 12:00:00\n- 记录数: 1\n\n## 2026-06-13 · 通知\n\n- metadata: `{\"importance\":4,\"channel_id\":\"message\"}`\n\n[通知] 微信 - 项目群\n下午三点同步\n",
+        );
+
+        assert_eq!(
+            lines,
+            vec![
+                "- 记录数: 1".to_string(),
+                "".to_string(),
+                "## 2026-06-13 · 通知".to_string(),
+                "".to_string(),
+                "- metadata: `{\"importance\":4,\"channel_id\":\"message\"}`".to_string(),
+                "".to_string(),
+                "[通知] 微信 - 项目群".to_string(),
+                "下午三点同步".to_string(),
+            ]
         );
     }
 

@@ -69,6 +69,8 @@ pub enum ServerMessage {
         to_device_id: String,
         stored_at: i64,
         queued: bool,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        client_message_id: Option<String>,
     },
 
     // 通知转发

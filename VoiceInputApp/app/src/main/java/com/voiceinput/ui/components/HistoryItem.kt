@@ -7,6 +7,8 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -18,8 +20,10 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
+import androidx.compose.material3.AssistChipDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -35,6 +39,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.voiceinput.data.model.HistoryItem
 import com.voiceinput.data.model.SyncStatus
@@ -42,12 +47,15 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
-@OptIn(ExperimentalFoundationApi::class)
+@OptIn(ExperimentalFoundationApi::class, ExperimentalLayoutApi::class)
 @Composable
 fun HistoryItemView(
     item: HistoryItem,
     onClick: () -> Unit,
-    onDelete: (() -> Unit)? = null
+    onDelete: (() -> Unit)? = null,
+    selectionMode: Boolean = false,
+    selected: Boolean = false,
+    onSelectedChange: ((Boolean) -> Unit)? = null
 ) {
     var isPressed by remember { mutableStateOf(false) }
     var showDeleteDialog by remember { mutableStateOf(false) }
@@ -77,78 +85,106 @@ fun HistoryItemView(
             ),
         elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
         colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surface
+            containerColor = if (selected) {
+                MaterialTheme.colorScheme.primaryContainer
+            } else {
+                MaterialTheme.colorScheme.surface
+            }
         )
     ) {
-        Row(
+        Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(16.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.Top
+                .padding(16.dp)
         ) {
-            Column(modifier = Modifier.weight(1f)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.Top
+            ) {
+                if (selectionMode) {
+                    Checkbox(
+                        checked = selected,
+                        onCheckedChange = { checked -> onSelectedChange?.invoke(checked) }
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                }
                 Text(
                     text = item.text,
                     style = MaterialTheme.typography.bodyLarge,
-                    color = MaterialTheme.colorScheme.onSurface
+                    color = MaterialTheme.colorScheme.onSurface,
+                    modifier = Modifier.weight(1f)
                 )
+            }
+
+            val tags = item.tags
+                .split(',')
+                .map { it.trim() }
+                .filter { it.isNotEmpty() }
+                .take(3)
+            if (tags.isNotEmpty() || item.sourceApp.isNotBlank()) {
                 Spacer(modifier = Modifier.height(8.dp))
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                FlowRow(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalArrangement = Arrangement.spacedBy(2.dp)
                 ) {
-                    StatusChip(item.syncStatus)
-                    if (item.targetDeviceName.isNotBlank()) {
-                        AssistChip(
-                            onClick = {},
-                            enabled = false,
-                            label = { Text(item.targetDeviceName) }
-                        )
+                    if (item.sourceApp.isNotBlank()) {
+                        CompactInfoChip(item.sourceApp)
                     }
-                }
-                Spacer(modifier = Modifier.height(8.dp))
-                Text(
-                    text = formatTimestamp(item.timestamp),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                item.storedAt?.takeIf { item.syncStatus == SyncStatus.STORED }?.let {
-                    Text(
-                        text = "服务器暂存: ${formatAbsoluteTimestamp(it)}",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-                item.syncedAt?.let {
-                    Text(
-                        text = "电脑已接收: ${formatAbsoluteTimestamp(it)}",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.primary
-                    )
-                }
-                item.errorMessage?.takeIf { it.isNotBlank() }?.let {
-                    Text(
-                        text = it,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.error
-                    )
+                    tags.forEach { tag -> CompactInfoChip("#$tag") }
                 }
             }
 
-            if (onDelete != null) {
+            Spacer(modifier = Modifier.height(8.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                StatusChip(item.syncStatus)
                 Spacer(modifier = Modifier.width(8.dp))
-                IconButton(
-                    onClick = { showDeleteDialog = true },
-                    modifier = Modifier.size(40.dp)
-                ) {
-                    Icon(
-                        Icons.Default.Delete,
-                        contentDescription = "删除",
-                        tint = MaterialTheme.colorScheme.error,
-                        modifier = Modifier.size(20.dp)
-                    )
+                Text(
+                    text = item.compactMetaText(),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f)
+                )
+                if (onDelete != null) {
+                    IconButton(
+                        onClick = { showDeleteDialog = true },
+                        modifier = Modifier.size(36.dp)
+                    ) {
+                        Icon(
+                            Icons.Default.Delete,
+                            contentDescription = "删除",
+                            tint = MaterialTheme.colorScheme.error,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
                 }
+            }
+
+            item.storedAt?.takeIf { item.syncStatus == SyncStatus.STORED }?.let {
+                Text(
+                    text = "服务器暂存 ${formatAbsoluteTimestamp(it)}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            if (item.syncedAt == null && item.syncStatus != SyncStatus.SYNCED && item.syncStatus != SyncStatus.DIRECT) {
+                Text(
+                    text = "电脑未接收",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error
+                )
+            }
+            item.errorMessage?.takeIf { it.isNotBlank() }?.let {
+                Text(
+                    text = it,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error
+                )
             }
         }
     }
@@ -185,6 +221,32 @@ fun HistoryItemView(
 }
 
 @Composable
+private fun CompactInfoChip(label: String) {
+    AssistChip(
+        onClick = {},
+        enabled = false,
+        label = {
+            Text(
+                text = label,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+        },
+        colors = AssistChipDefaults.assistChipColors(
+            disabledContainerColor = MaterialTheme.colorScheme.surfaceVariant,
+            disabledLabelColor = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+    )
+}
+
+private fun HistoryItem.compactMetaText(): String {
+    return listOfNotNull(
+        targetDeviceName.takeIf { it.isNotBlank() },
+        formatTimestamp(timestamp)
+    ).joinToString(" · ")
+}
+
+@Composable
 private fun StatusChip(status: SyncStatus) {
     val (label, containerColor, contentColor) = when (status) {
         SyncStatus.PENDING -> Triple("发送中", Color(0xFFFFF3CD), Color(0xFF7A5400))
@@ -198,7 +260,7 @@ private fun StatusChip(status: SyncStatus) {
         onClick = {},
         enabled = false,
         label = { Text(label) },
-        colors = androidx.compose.material3.AssistChipDefaults.assistChipColors(
+        colors = AssistChipDefaults.assistChipColors(
             disabledContainerColor = containerColor,
             disabledLabelColor = contentColor
         )
@@ -218,5 +280,5 @@ private fun formatTimestamp(timestamp: Long): String {
 }
 
 private fun formatAbsoluteTimestamp(timestamp: Long): String {
-    return SimpleDateFormat("MM-dd HH:mm:ss", Locale.getDefault()).format(Date(timestamp))
+    return SimpleDateFormat("MM-dd HH:mm", Locale.getDefault()).format(Date(timestamp))
 }

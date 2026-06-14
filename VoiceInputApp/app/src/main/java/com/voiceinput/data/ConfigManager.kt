@@ -17,8 +17,20 @@ class ConfigManager(context: Context) {
         private const val KEY_DEVICE_ID = "device_id"
         private const val KEY_DEVICE_NAME = "device_name"
         private const val KEY_NOTIFICATION_ENABLED = "notification_enabled"
+        private const val KEY_NOTIFICATION_INCLUDE_PACKAGES = "notification_include_packages"
+        private const val KEY_NOTIFICATION_EXCLUDE_PACKAGES = "notification_exclude_packages"
+        private const val KEY_NOTIFICATION_EXCLUDE_KEYWORDS = "notification_exclude_keywords"
+        private const val KEY_NOTIFICATION_FILTER_EMPTY = "notification_filter_empty"
+        private const val KEY_NOTIFICATION_FILTER_ONGOING = "notification_filter_ongoing"
+        private const val KEY_NOTIFICATION_FILTER_LOW_IMPORTANCE = "notification_filter_low_importance"
+        private const val KEY_NOTIFICATION_ALLOW_SENSITIVE_APPS = "notification_allow_sensitive_apps"
+        private const val KEY_NOTIFICATION_REDACT_SENSITIVE_CONTENT = "notification_redact_sensitive_content"
+        private const val KEY_NOTIFICATION_REDACT_KEYWORDS = "notification_redact_keywords"
+        private const val KEY_NOTIFICATION_FORWARD_MODE = "notification_forward_mode"
+        private const val KEY_FOREGROUND_CONNECTION_STATUS = "foreground_connection_status"
         private const val KEY_PAIRED_DEVICES = "paired_devices"
         private const val KEY_LAST_TARGET_DEVICE = "last_target_device"
+        private const val KEY_INPUT_DRAFT = "input_draft"
         private val LEGACY_SERVER_URLS = setOf(
             "wss://nas.smarthome2020.top:7070",
             "wss://ha.wwszxc.tax:16908"
@@ -111,11 +123,180 @@ class ConfigManager(context: Context) {
         return prefs.getBoolean(KEY_NOTIFICATION_ENABLED, false)
     }
 
+    fun saveNotificationIncludePackages(value: String) {
+        prefs.edit().putString(KEY_NOTIFICATION_INCLUDE_PACKAGES, value).apply()
+    }
+
+    fun getNotificationIncludePackages(): String {
+        return prefs.getString(KEY_NOTIFICATION_INCLUDE_PACKAGES, "") ?: ""
+    }
+
+    fun saveNotificationExcludePackages(value: String) {
+        prefs.edit().putString(KEY_NOTIFICATION_EXCLUDE_PACKAGES, value).apply()
+    }
+
+    fun getNotificationExcludePackages(): String {
+        return prefs.getString(KEY_NOTIFICATION_EXCLUDE_PACKAGES, "") ?: ""
+    }
+
+    fun saveNotificationExcludeKeywords(value: String) {
+        prefs.edit().putString(KEY_NOTIFICATION_EXCLUDE_KEYWORDS, value).apply()
+    }
+
+    fun getNotificationExcludeKeywords(): String {
+        return prefs.getString(KEY_NOTIFICATION_EXCLUDE_KEYWORDS, "") ?: ""
+    }
+
+    fun saveNotificationFilterEmpty(enabled: Boolean) {
+        prefs.edit().putBoolean(KEY_NOTIFICATION_FILTER_EMPTY, enabled).apply()
+    }
+
+    fun shouldFilterEmptyNotifications(): Boolean {
+        return prefs.getBoolean(KEY_NOTIFICATION_FILTER_EMPTY, true)
+    }
+
+    fun saveNotificationFilterOngoing(enabled: Boolean) {
+        prefs.edit().putBoolean(KEY_NOTIFICATION_FILTER_ONGOING, enabled).apply()
+    }
+
+    fun shouldFilterOngoingNotifications(): Boolean {
+        return prefs.getBoolean(KEY_NOTIFICATION_FILTER_ONGOING, true)
+    }
+
+    fun saveNotificationFilterLowImportance(enabled: Boolean) {
+        prefs.edit().putBoolean(KEY_NOTIFICATION_FILTER_LOW_IMPORTANCE, enabled).apply()
+    }
+
+    fun shouldFilterLowImportanceNotifications(): Boolean {
+        return prefs.getBoolean(KEY_NOTIFICATION_FILTER_LOW_IMPORTANCE, false)
+    }
+
+    fun saveNotificationAllowSensitiveApps(enabled: Boolean) {
+        prefs.edit().putBoolean(KEY_NOTIFICATION_ALLOW_SENSITIVE_APPS, enabled).apply()
+    }
+
+    fun allowSensitiveNotificationApps(): Boolean {
+        return prefs.getBoolean(KEY_NOTIFICATION_ALLOW_SENSITIVE_APPS, false)
+    }
+
+    fun saveNotificationRedactSensitiveContent(enabled: Boolean) {
+        prefs.edit().putBoolean(KEY_NOTIFICATION_REDACT_SENSITIVE_CONTENT, enabled).apply()
+    }
+
+    fun shouldRedactSensitiveNotificationContent(): Boolean {
+        return prefs.getBoolean(KEY_NOTIFICATION_REDACT_SENSITIVE_CONTENT, true)
+    }
+
+    fun saveNotificationRedactKeywords(value: String) {
+        prefs.edit().putString(KEY_NOTIFICATION_REDACT_KEYWORDS, value).apply()
+    }
+
+    fun getNotificationRedactKeywords(): String {
+        return prefs.getString(KEY_NOTIFICATION_REDACT_KEYWORDS, "") ?: ""
+    }
+
+    fun redactNotificationContent(value: String): String {
+        if (!shouldRedactSensitiveNotificationContent() || value.isBlank()) {
+            return value
+        }
+        return NotificationFilterRules.redactSensitiveContent(
+            value = value,
+            customKeywords = getNotificationRedactKeywords()
+        )
+    }
+
+    fun saveNotificationForwardMode(mode: String) {
+        val normalized = when (mode) {
+            "history_only", "pc_center", "clipboard", "ai_silent" -> mode
+            else -> "pc_center"
+        }
+        prefs.edit().putString(KEY_NOTIFICATION_FORWARD_MODE, normalized).apply()
+    }
+
+    fun getNotificationForwardMode(): String {
+        return prefs.getString(KEY_NOTIFICATION_FORWARD_MODE, "pc_center") ?: "pc_center"
+    }
+
+    fun saveForegroundConnectionStatus(connected: Boolean, deviceName: String) {
+        val status = ForegroundConnectionStatus(
+            connected = connected,
+            deviceName = deviceName,
+            updatedAt = System.currentTimeMillis()
+        )
+        prefs.edit().putString(KEY_FOREGROUND_CONNECTION_STATUS, gson.toJson(status)).apply()
+    }
+
+    fun getForegroundConnectionStatus(): ForegroundConnectionStatus {
+        val json = prefs.getString(KEY_FOREGROUND_CONNECTION_STATUS, null)
+        return try {
+            if (json.isNullOrBlank()) {
+                ForegroundConnectionStatus()
+            } else {
+                gson.fromJson(json, ForegroundConnectionStatus::class.java) ?: ForegroundConnectionStatus()
+            }
+        } catch (e: Exception) {
+            ForegroundConnectionStatus()
+        }
+    }
+
+    fun shouldForwardNotification(
+        appPackage: String,
+        title: String,
+        text: String,
+        isOngoing: Boolean = false,
+        importance: Int = android.app.NotificationManager.IMPORTANCE_DEFAULT
+    ): Boolean {
+        return NotificationFilterRules.shouldForwardNotification(
+            appPackage = appPackage,
+            title = title,
+            text = text,
+            isOngoing = isOngoing,
+            importance = importance,
+            options = NotificationFilterRules.ForwardOptions(
+                includePackages = getNotificationIncludePackages(),
+                excludePackages = getNotificationExcludePackages(),
+                excludeKeywords = getNotificationExcludeKeywords(),
+                filterEmpty = shouldFilterEmptyNotifications(),
+                filterOngoing = shouldFilterOngoingNotifications(),
+                filterLowImportance = shouldFilterLowImportanceNotifications(),
+                lowImportanceThreshold = android.app.NotificationManager.IMPORTANCE_LOW,
+                allowSensitiveApps = allowSensitiveNotificationApps()
+            )
+        )
+    }
+
     // 保存配对设备
-    fun savePairedDevice(deviceId: String, deviceName: String, deviceType: String, localIp: String = "", localPort: Int = 0) {
+    fun savePairedDevice(
+        deviceId: String,
+        deviceName: String,
+        deviceType: String,
+        localIp: String = "",
+        localPort: Int = 0,
+        lastConnectedAt: Long? = null
+    ) {
         val devices = getPairedDevices().toMutableMap()
-        devices[deviceId] = PairedDevice(deviceId, deviceName, deviceType, localIp, localPort)
+        val existing = devices[deviceId]
+        devices[deviceId] = PairedDevice(
+            deviceId = deviceId,
+            deviceName = deviceName.ifBlank { existing?.deviceName.orEmpty() },
+            deviceType = deviceType.ifBlank { existing?.deviceType ?: "desktop" },
+            localIp = localIp.ifBlank { existing?.localIp.orEmpty() },
+            localPort = if (localPort > 0) localPort else existing?.localPort ?: 0,
+            lastConnectedAt = lastConnectedAt ?: existing?.lastConnectedAt ?: 0L
+        )
         prefs.edit().putString(KEY_PAIRED_DEVICES, gson.toJson(devices)).apply()
+    }
+
+    fun markPairedDeviceConnected(deviceId: String, connectedAt: Long = System.currentTimeMillis()) {
+        val device = getPairedDevices()[deviceId] ?: return
+        savePairedDevice(
+            deviceId = device.deviceId,
+            deviceName = device.deviceName,
+            deviceType = device.deviceType,
+            localIp = device.localIp,
+            localPort = device.localPort,
+            lastConnectedAt = connectedAt
+        )
     }
 
     // 获取所有配对设备
@@ -159,6 +340,18 @@ class ConfigManager(context: Context) {
         prefs.edit().remove(KEY_LAST_TARGET_DEVICE).apply()
     }
 
+    fun saveInputDraft(text: String) {
+        prefs.edit().putString(KEY_INPUT_DRAFT, text).apply()
+    }
+
+    fun getInputDraft(): String {
+        return prefs.getString(KEY_INPUT_DRAFT, "") ?: ""
+    }
+
+    fun clearInputDraft() {
+        prefs.edit().remove(KEY_INPUT_DRAFT).apply()
+    }
+
     // 清除所有配置
     fun clearAll() {
         prefs.edit().clear().apply()
@@ -169,11 +362,18 @@ class ConfigManager(context: Context) {
         val deviceName: String,
         val deviceType: String,
         val localIp: String = "",
-        val localPort: Int = 0
+        val localPort: Int = 0,
+        val lastConnectedAt: Long = 0L
     )
 
     data class LastTargetDevice(
         val deviceId: String,
         val deviceName: String
+    )
+
+    data class ForegroundConnectionStatus(
+        val connected: Boolean = false,
+        val deviceName: String = "",
+        val updatedAt: Long = 0L
     )
 }

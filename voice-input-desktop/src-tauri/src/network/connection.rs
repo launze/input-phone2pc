@@ -4,7 +4,7 @@ use tokio::net::tcp::OwnedWriteHalf;
 use tokio::net::{TcpListener, TcpStream};
 
 use crate::crypto::{decrypt_string, EncryptionKey};
-use crate::input;
+use crate::{input, storage::config::AppConfig};
 use crate::storage::history::{self, NewHistoryRecord};
 use base64::Engine;
 use std::error::Error;
@@ -145,7 +145,7 @@ async fn handle_client(socket: TcpStream, app_handle: AppHandle) -> Result<(), B
                         }
                     }
                 }
-                "TEXT_INPUT" | "IMAGE_INPUT" => {
+                "TEXT_INPUT" | "IMAGE_INPUT" | "NOTIFICATION_INPUT" => {
                     handle_input_message(
                         &message,
                         &mut writer,
@@ -198,10 +198,8 @@ async fn handle_input_message(
                     .get("press_enter")
                     .and_then(|v| v.as_bool())
                     .unwrap_or(false);
-                input::simulate_text_input(text);
-                if press_enter {
-                    let _ = input::simulate_enter_key();
-                }
+                let input_result = handle_text_input_by_mode(text, press_enter, false);
+                let history_delivery_mode = history_delivery_mode_for_text_input("live", &input_result.mode);
 
                 let record = NewHistoryRecord {
                     id: Uuid::new_v4().to_string(),
@@ -212,7 +210,7 @@ async fn handle_input_message(
                     sent_at,
                     received_at,
                     via: via.to_string(),
-                    delivery_mode: "live".to_string(),
+                    delivery_mode: history_delivery_mode.clone(),
                     metadata: None,
                 };
                 if let Ok((stored, inserted)) = history::record_message(record) {
@@ -228,13 +226,16 @@ async fn handle_input_message(
                     "via": via,
                     "timestamp": received_at,
                     "sent_at": sent_at,
-                    "delivery_mode": "live"
+                    "delivery_mode": history_delivery_mode
                 });
                 app_handle
                     .emit("text_received", &text_payload)
                     .unwrap_or(());
+                app_handle
+                    .emit("input_result", &input_result)
+                    .unwrap_or(());
 
-                send_input_ack(writer, "text", true).await?;
+                send_input_ack(writer, "text", input_result.success).await?;
             }
         }
         "IMAGE_INPUT" => {
@@ -291,10 +292,168 @@ async fn handle_input_message(
 
             send_input_ack(writer, "image", success).await?;
         }
+        "NOTIFICATION_INPUT" => {
+            let app_name = message
+                .get("app_name")
+                .and_then(|v| v.as_str())
+                .unwrap_or("未知应用");
+            let app_package = message
+                .get("app_package")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            let title = message.get("title").and_then(|v| v.as_str()).unwrap_or("");
+            let text = message.get("text").and_then(|v| v.as_str()).unwrap_or("");
+            let content = format_notification_content(app_name, title, text);
+            let copy_to_clipboard = message
+                .get("copy_to_clipboard")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
+            let metadata = serde_json::json!({
+                "app_name": app_name,
+                "app_package": app_package,
+                "title": title,
+                "text": text,
+                "forward_mode": message.get("forward_mode").and_then(|v| v.as_str()),
+                "silent": message.get("silent").and_then(|v| v.as_bool()),
+                "copy_to_clipboard": copy_to_clipboard,
+                "notification_key": message.get("notification_key").and_then(|v| v.as_str()),
+                "channel_id": message.get("channel_id").and_then(|v| v.as_str()),
+                "group_key": message.get("group_key").and_then(|v| v.as_str()),
+                "category": message.get("category").and_then(|v| v.as_str()),
+                "sub_text": message.get("sub_text").and_then(|v| v.as_str()),
+                "big_text": message.get("big_text").and_then(|v| v.as_str()),
+                "conversation_title": message.get("conversation_title").and_then(|v| v.as_str()),
+                "post_time": message.get("post_time").and_then(|v| v.as_i64()),
+                "is_ongoing": message.get("is_ongoing").and_then(|v| v.as_bool()),
+                "is_clearable": message.get("is_clearable").and_then(|v| v.as_bool()),
+                "importance": message.get("importance").and_then(|v| v.as_i64()),
+                "icon": message.get("icon").and_then(|v| v.as_str())
+            })
+            .to_string();
+            let record = NewHistoryRecord {
+                id: Uuid::new_v4().to_string(),
+                from_device_id,
+                from_device_name,
+                content_type: "notification".to_string(),
+                content: content.clone(),
+                sent_at,
+                received_at,
+                via: via.to_string(),
+                delivery_mode: "live".to_string(),
+                metadata: Some(metadata),
+            };
+            if let Ok((stored, inserted)) = history::record_message(record) {
+                if inserted {
+                    app_handle.emit("history_recorded", &stored).unwrap_or(());
+                }
+            }
+            if copy_to_clipboard {
+                let _ = input::copy_text_to_clipboard(&content);
+            }
+
+            let notification_payload = serde_json::json!({
+                "via": via,
+                "timestamp": received_at,
+                "sent_at": sent_at,
+                "delivery_mode": "live",
+                "app_name": app_name,
+                "app_package": app_package,
+                "title": title,
+                "text": text,
+                "content": content,
+                "forward_mode": message.get("forward_mode").and_then(|v| v.as_str()),
+                "silent": message.get("silent").and_then(|v| v.as_bool()).unwrap_or(false),
+                "copy_to_clipboard": copy_to_clipboard
+            });
+            app_handle
+                .emit("notification_received", &notification_payload)
+                .unwrap_or(());
+
+            send_input_ack(writer, "notification", true).await?;
+        }
         _ => {}
     }
 
     Ok(())
+}
+
+fn format_notification_content(app_name: &str, title: &str, text: &str) -> String {
+    let mut content = format!("[通知] {}", app_name);
+    if !title.trim().is_empty() {
+        content.push_str(" - ");
+        content.push_str(title.trim());
+    }
+    if !text.trim().is_empty() {
+        content.push('\n');
+        content.push_str(text.trim());
+    }
+    content
+}
+
+#[derive(serde::Serialize)]
+struct TextInputResult {
+    success: bool,
+    mode: String,
+    message: String,
+    timestamp: i64,
+}
+
+fn handle_text_input_by_mode(text: &str, press_enter: bool, skip_injection: bool) -> TextInputResult {
+    let now = chrono::Utc::now().timestamp_millis();
+    if skip_injection {
+        return TextInputResult {
+            success: true,
+            mode: "history_only".to_string(),
+            message: "离线补发已保存到历史，未自动插入。".to_string(),
+            timestamp: now,
+        };
+    }
+
+    let mode = AppConfig::load().input_mode;
+    match mode.as_str() {
+        "clipboard" => match input::copy_text_to_clipboard(text) {
+            Ok(_) => TextInputResult {
+                success: true,
+                mode,
+                message: "已复制到剪贴板。".to_string(),
+                timestamp: now,
+            },
+            Err(error) => TextInputResult {
+                success: false,
+                mode,
+                message: error,
+                timestamp: now,
+            },
+        },
+        "confirm" => TextInputResult {
+            success: true,
+            mode,
+            message: "已保存到历史，等待手动插入。".to_string(),
+            timestamp: now,
+        },
+        _ => {
+            input::simulate_text_input(text);
+            if press_enter {
+                let _ = input::simulate_enter_key();
+            }
+            TextInputResult {
+                success: true,
+                mode: "direct".to_string(),
+                message: "已直接插入到当前光标位置。".to_string(),
+                timestamp: now,
+            }
+        }
+    }
+}
+
+fn history_delivery_mode_for_text_input(delivery_mode: &str, input_mode: &str) -> String {
+    if delivery_mode == "offline_sync" || input_mode == "history_only" {
+        "offline_sync".to_string()
+    } else if input_mode == "confirm" {
+        "manual".to_string()
+    } else {
+        delivery_mode.to_string()
+    }
 }
 
 async fn send_input_ack(

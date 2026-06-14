@@ -91,6 +91,17 @@ class HistoryRepository(context: Context) {
         saveHistory(currentHistory)
     }
 
+    suspend fun upsertHistoryItem(item: HistoryItem) = withContext(Dispatchers.IO) {
+        val currentHistory = readHistoryItems().toMutableList()
+        val index = currentHistory.indexOfFirst { it.id == item.id }
+        if (index >= 0) {
+            currentHistory[index] = item
+        } else {
+            currentHistory.add(item)
+        }
+        saveHistory(currentHistory)
+    }
+
     suspend fun updateHistoryItem(itemId: String, transform: (HistoryItem) -> HistoryItem) =
         withContext(Dispatchers.IO) {
             val updated = readHistoryItems().map { item ->
@@ -98,6 +109,28 @@ class HistoryRepository(context: Context) {
             }
             saveHistory(updated)
         }
+
+    suspend fun updateHistoryItems(
+        itemIds: Set<String>,
+        transform: (HistoryItem) -> HistoryItem
+    ): Int = withContext(Dispatchers.IO) {
+        if (itemIds.isEmpty()) {
+            return@withContext 0
+        }
+        var changedCount = 0
+        val updated = readHistoryItems().map { item ->
+            if (item.id in itemIds) {
+                changedCount += 1
+                transform(item)
+            } else {
+                item
+            }
+        }
+        if (changedCount > 0) {
+            saveHistory(updated)
+        }
+        changedCount
+    }
 
     suspend fun updateHistoryByServerMessageId(
         serverMessageId: String,
@@ -123,6 +156,19 @@ class HistoryRepository(context: Context) {
         saveHistory(currentHistory)
     }
 
+    suspend fun deleteHistoryItems(itemIds: Set<String>): Int = withContext(Dispatchers.IO) {
+        if (itemIds.isEmpty()) {
+            return@withContext 0
+        }
+        val currentHistory = readHistoryItems()
+        val updatedHistory = currentHistory.filterNot { it.id in itemIds }
+        val deletedCount = currentHistory.size - updatedHistory.size
+        if (deletedCount > 0) {
+            saveHistory(updatedHistory)
+        }
+        deletedCount
+    }
+
     suspend fun clearHistory() = withContext(Dispatchers.IO) {
         prefs.edit().remove(KEY_HISTORY_ITEMS).apply()
     }
@@ -132,7 +178,11 @@ class HistoryRepository(context: Context) {
         if (query.isBlank()) return@withContext allHistory
         allHistory.filter {
             it.text.contains(query, ignoreCase = true) ||
-                it.targetDeviceName.contains(query, ignoreCase = true)
+                it.targetDeviceName.contains(query, ignoreCase = true) ||
+                it.sourceApp.contains(query, ignoreCase = true) ||
+                it.sourcePackage.contains(query, ignoreCase = true) ||
+                it.tags.contains(query, ignoreCase = true) ||
+                it.metadata.contains(query, ignoreCase = true)
         }
     }
 
@@ -156,6 +206,12 @@ class HistoryRepository(context: Context) {
             storedAt = getNullableLong("storedAt"),
             syncedAt = getNullableLong("syncedAt"),
             errorMessage = getNullableString("errorMessage"),
+            isFavorite = getBoolean("isFavorite"),
+            isPinned = getBoolean("isPinned"),
+            tags = getString("tags"),
+            sourceApp = getString("sourceApp"),
+            sourcePackage = getString("sourcePackage"),
+            metadata = getString("metadata"),
         )
     }
 
@@ -173,6 +229,10 @@ class HistoryRepository(context: Context) {
 
     private fun JsonObject.getNullableLong(name: String): Long? {
         return if (has(name) && !get(name).isJsonNull) get(name).asLong else null
+    }
+
+    private fun JsonObject.getBoolean(name: String): Boolean {
+        return if (has(name) && !get(name).isJsonNull) get(name).asBoolean else false
     }
 
     private fun JsonObject.getSyncStatus(name: String): SyncStatus {
