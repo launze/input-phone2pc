@@ -106,13 +106,15 @@ jobs:
         include:
           - arch: x64
             runner: ubuntu-24.04
+            triplet: x64-linux-static-gui
           - arch: arm64
             runner: ubuntu-24.04-arm
+            triplet: arm64-linux-static-gui
 
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install dependencies
+      - name: Install system dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y \
@@ -120,14 +122,67 @@ jobs:
             cmake \
             ninja-build \
             pkg-config \
-            libwxgtk3.2-dev \
-            libopencv-dev
+            autoconf \
+            automake \
+            autopoint \
+            bison \
+            gperf \
+            libtool \
+            libx11-dev \
+            libxext-dev \
+            libxrender-dev \
+            libxrandr-dev \
+            libxinerama-dev \
+            libxcursor-dev \
+            libxi-dev \
+            libxfixes-dev \
+            libgl1-mesa-dev \
+            libglu1-mesa-dev \
+            libgtk-3-dev
+
+      - name: Cache vcpkg
+        uses: actions/cache@v4
+        with:
+          path: |
+            ${{ runner.temp }}/vcpkg/installed
+            ${{ runner.temp }}/vcpkg/downloads
+            ${{ runner.temp }}/vcpkg/buildtrees
+          key: file-qr-gui-vcpkg-${{ runner.os }}-${{ matrix.arch }}-${{ matrix.triplet }}-${{ hashFiles('voice-input-file-qr-gui/CMakeLists.txt') }}
+          restore-keys: |
+            file-qr-gui-vcpkg-${{ runner.os }}-${{ matrix.arch }}-${{ matrix.triplet }}-
+
+      - name: Install vcpkg dependencies
+        shell: bash
+        run: |
+          vcpkg_root="$RUNNER_TEMP/vcpkg"
+          if [ ! -x "$vcpkg_root/vcpkg" ]; then
+            rm -rf "$vcpkg_root"
+            git clone https://github.com/microsoft/vcpkg.git "$vcpkg_root"
+          fi
+          "$vcpkg_root/bootstrap-vcpkg.sh"
+          mkdir -p "$RUNNER_TEMP/vcpkg-triplets"
+          cat > "$RUNNER_TEMP/vcpkg-triplets/${{ matrix.triplet }}.cmake" <<'EOF'
+          set(VCPKG_TARGET_ARCHITECTURE $ENV{VCPKG_TARGET_ARCH})
+          set(VCPKG_CRT_LINKAGE dynamic)
+          set(VCPKG_LIBRARY_LINKAGE static)
+          set(VCPKG_CMAKE_SYSTEM_NAME Linux)
+          EOF
+          export VCPKG_TARGET_ARCH="${{ matrix.arch == 'arm64' && 'arm64' || 'x64' }}"
+          "$vcpkg_root/vcpkg" install \
+            "wxwidgets:${{ matrix.triplet }}" \
+            "opencv4[png,jpeg]:${{ matrix.triplet }}" \
+            --overlay-triplets="$RUNNER_TEMP/vcpkg-triplets"
+          echo "VCPKG_ROOT=$vcpkg_root" >> "$GITHUB_ENV"
+          echo "VCPKG_OVERLAY_TRIPLETS=$RUNNER_TEMP/vcpkg-triplets" >> "$GITHUB_ENV"
 
       - name: Configure
         run: |
           cmake -S voice-input-file-qr-gui -B "build/file-qr-gui-linux-${{ matrix.arch }}" \
             -G Ninja \
-            -DCMAKE_BUILD_TYPE=Release
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_TOOLCHAIN_FILE="$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" \
+            -DVCPKG_TARGET_TRIPLET="${{ matrix.triplet }}" \
+            -DVCPKG_OVERLAY_TRIPLETS="$VCPKG_OVERLAY_TRIPLETS"
 
       - name: Build
         run: cmake --build "build/file-qr-gui-linux-${{ matrix.arch }}" --config Release --parallel

@@ -15,6 +15,11 @@
 #include <opencv2/core.hpp>
 #include <opencv2/imgproc.hpp>
 
+// libcorrect defines ssize_t on MSVC; tell wxWidgets not to define it again.
+#if defined(_MSC_VER) && !defined(HAVE_SSIZE_T)
+#define HAVE_SSIZE_T
+#endif
+
 #include <wx/wx.h>
 #include <wx/dcbuffer.h>
 #include <wx/file.h>
