@@ -7,18 +7,7 @@
  * WebGL, WebView, OpenGL, or browser GPU acceleration.
  */
 
-#include "cimb_translator/Config.h"
-#include "compression/zstd_compressor.h"
-#include "encoder/Encoder.h"
-#include "fountain/FountainInit.h"
-#include "fountain/fountain_encoder_stream.h"
-#include <opencv2/core.hpp>
-#include <opencv2/imgproc.hpp>
-
-// libcorrect defines ssize_t on MSVC; tell wxWidgets not to define it again.
-#if defined(_MSC_VER) && !defined(HAVE_SSIZE_T)
-#define HAVE_SSIZE_T
-#endif
+#include "qr_encoder_backend.h"
 
 #include <wx/wx.h>
 #include <wx/dcbuffer.h>
@@ -30,19 +19,14 @@
 
 #include <algorithm>
 #include <array>
-#include <cstdint>
 #include <iterator>
-#include <memory>
-#include <optional>
-#include <sstream>
 #include <string>
+#include <utility>
 
 namespace {
 
 constexpr int kDefaultMode = 68;
-constexpr int kCompressionLevel = 16;
 constexpr int kTargetFps = 45;
-constexpr int kInitialEncodeId = 109;
 constexpr int kFpsOptions[] = {15, 20, 25, 30, 40, 45, 50, 60};
 
 wxString U8(const char* value)
@@ -74,6 +58,11 @@ std::string BasenameUtf8(const wxString& path)
     return ToUtf8(wxFileName(path).GetFullName());
 }
 
+wxString FromUtf8(const std::string& value)
+{
+    return wxString::FromUTF8(value.data(), value.size());
+}
+
 bool ReadFileBytes(const wxString& path, std::string* out)
 {
     wxFile file(path, wxFile::read);
@@ -95,123 +84,13 @@ bool ReadFileBytes(const wxString& path, std::string* out)
     return bytesRead == static_cast<decltype(bytesRead)>(length);
 }
 
-wxBitmap MatToBitmap(const cv::Mat& src)
+wxBitmap FrameToBitmap(const EncodedFrame& frame)
 {
-    cv::Mat rgb;
-    if (src.channels() == 4) {
-        cv::cvtColor(src, rgb, cv::COLOR_BGRA2RGB);
-    } else if (src.channels() == 3) {
-        cv::cvtColor(src, rgb, cv::COLOR_BGR2RGB);
-    } else {
-        cv::cvtColor(src, rgb, cv::COLOR_GRAY2RGB);
-    }
-    if (!rgb.isContinuous()) {
-        rgb = rgb.clone();
-    }
-
-    wxImage image(rgb.cols, rgb.rows);
+    wxImage image(frame.width, frame.height);
     unsigned char* dst = image.GetData();
-    const size_t bytes = static_cast<size_t>(rgb.cols) * static_cast<size_t>(rgb.rows) * 3;
-    std::copy(rgb.data, rgb.data + bytes, dst);
+    std::copy(frame.rgb.begin(), frame.rgb.end(), dst);
     return wxBitmap(image);
 }
-
-class FileQrEncoder {
-public:
-    bool LoadFile(const wxString& path, int mode, wxString* error)
-    {
-        cimbar::Config::update(mode);
-        if (!FountainInit::init()) {
-            SetError(error, U8("初始化 fountain 编码器失败"));
-            return false;
-        }
-
-        std::string raw;
-        if (!ReadFileBytes(path, &raw)) {
-            SetError(error, U8("无法读取文件"));
-            return false;
-        }
-
-        cimbar::zstd_compressor<std::stringstream> compressed;
-        compressed.set_compression_level(kCompressionLevel);
-
-        const std::string filename = BasenameUtf8(path);
-        if (!filename.empty()) {
-            compressed.write_header(filename.data(), static_cast<unsigned>(filename.size()));
-        }
-
-        if (!compressed.write(raw.data(), raw.size())) {
-            SetError(error, U8("文件压缩失败"));
-            return false;
-        }
-
-        const unsigned chunkSize = cimbar::Config::fountain_chunk_size();
-        const size_t compressedSize = compressed.size();
-        if (compressedSize < chunkSize) {
-            compressed.pad(static_cast<unsigned>(chunkSize - compressedSize + 1));
-        }
-
-        ++encodeId_;
-        stream_ = fountain_encoder_stream::create(compressed, chunkSize, encodeId_);
-        frameCount_ = 0;
-        if (!stream_) {
-            SetError(error, U8("创建二维码帧流失败"));
-            return false;
-        }
-
-        fileName_ = wxFileName(path).GetFullName();
-        filePath_ = path;
-        fileSize_ = raw.size();
-        mode_ = mode;
-        return true;
-    }
-
-    std::optional<wxBitmap> NextBitmap()
-    {
-        if (!stream_) {
-            return std::nullopt;
-        }
-
-        const unsigned required = stream_->blocks_required() * 8;
-        if (stream_->block_count() > required) {
-            stream_->restart();
-            frameCount_ = 0;
-        }
-
-        Encoder encoder;
-        encoder.set_encode_id(encodeId_);
-        auto frame = encoder.encode_next(*stream_);
-        if (!frame) {
-            return std::nullopt;
-        }
-
-        ++frameCount_;
-        return MatToBitmap(*frame);
-    }
-
-    bool HasFile() const { return static_cast<bool>(stream_); }
-    int FrameCount() const { return frameCount_; }
-    wxString FileName() const { return fileName_; }
-    wxString FilePath() const { return filePath_; }
-    size_t FileSize() const { return fileSize_; }
-    int Mode() const { return mode_; }
-
-private:
-    static void SetError(wxString* target, const wxString& value)
-    {
-        if (target) {
-            *target = value;
-        }
-    }
-
-    fountain_encoder_stream::ptr stream_;
-    uint8_t encodeId_ = kInitialEncodeId;
-    int frameCount_ = 0;
-    wxString fileName_;
-    wxString filePath_;
-    size_t fileSize_ = 0;
-    int mode_ = kDefaultMode;
-};
 
 class QrCanvas final : public wxPanel {
 public:
@@ -393,19 +272,26 @@ private:
             return;
         }
 
-        wxString error;
+        std::string raw;
+        if (!ReadFileBytes(dialog.GetPath(), &raw)) {
+            statusText_->SetLabel(U8("状态：读取文件失败"));
+            wxMessageBox(U8("无法读取文件"), U8("错误"), wxOK | wxICON_ERROR, this);
+            return;
+        }
+
+        std::string error;
         timer_.Stop();
         canvas_->Clear();
         statusText_->SetLabel(U8("状态：正在编码..."));
 
-        if (!encoder_.LoadFile(dialog.GetPath(), SelectedMode(), &error)) {
+        if (!encoder_.LoadData(std::move(raw), BasenameUtf8(dialog.GetPath()), SelectedMode(), &error)) {
             statusText_->SetLabel(U8("状态：编码失败"));
-            wxMessageBox(error, U8("错误"), wxOK | wxICON_ERROR, this);
+            wxMessageBox(FromUtf8(error), U8("错误"), wxOK | wxICON_ERROR, this);
             return;
         }
 
-        SetTitle(U8("语传文件二维码生成工具 - ") + encoder_.FileName());
-        fileNameText_->SetLabel(U8("当前文件：") + encoder_.FileName());
+        SetTitle(U8("语传文件二维码生成工具 - ") + FromUtf8(encoder_.FileName()));
+        fileNameText_->SetLabel(U8("当前文件：") + FromUtf8(encoder_.FileName()));
         fileNameText_->Wrap(250);
         fileSizeText_->SetLabel(U8("文件大小：") + FormatBytes(encoder_.FileSize()));
         UpdateStatus();
@@ -418,13 +304,13 @@ private:
             return;
         }
 
-        auto bitmap = encoder_.NextBitmap();
-        if (!bitmap) {
+        auto frame = encoder_.NextFrame();
+        if (!frame) {
             statusText_->SetLabel(U8("状态：生成帧失败"));
             return;
         }
 
-        canvas_->SetFrame(*bitmap);
+        canvas_->SetFrame(FrameToBitmap(*frame));
         if (encoder_.FrameCount() % SelectedFps() == 0) {
             UpdateStatus();
         }
@@ -475,7 +361,6 @@ public:
             return false;
         }
 
-        cimbar::Config::update(kDefaultMode);
         auto* frame = new MainFrame();
         frame->Maximize(true);
         frame->Show(true);

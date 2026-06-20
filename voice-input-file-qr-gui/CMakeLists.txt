@@ -65,6 +65,7 @@ endforeach()
 
 add_executable(voiceinput-file-qr-gui WIN32
   src/main.cpp
+  src/qr_encoder_backend.cpp
 )
 
 target_include_directories(voiceinput-file-qr-gui PRIVATE
