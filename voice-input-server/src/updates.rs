@@ -458,7 +458,9 @@ fn is_desktop_asset(asset: &AssetEntry) -> bool {
 }
 
 fn is_tool_asset(asset: &AssetEntry) -> bool {
-    asset.platform.eq_ignore_ascii_case("tool") || asset.file_name.contains("file-qr-generator")
+    asset.platform.eq_ignore_ascii_case("tool")
+        || asset.file_name.contains("file-qr-generator")
+        || asset.file_name.contains("file-qr-gui")
 }
 
 fn render_asset_item(channel: &str, release: &ReleaseEntry, asset: &AssetEntry) -> String {

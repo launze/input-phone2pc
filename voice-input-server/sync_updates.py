@@ -15,6 +15,7 @@ ASSET_PATTERNS = [
     "voiceinput-android-",
     "voiceinput-desktop-",
     "voiceinput-file-qr-generator-",
+    "voiceinput-file-qr-gui-",
 ]
 
 
@@ -55,7 +56,7 @@ def classify_asset(name: str):
     lower = name.lower()
     if lower.endswith(".apk"):
         return ("android", "universal")
-    if "file-qr-generator" in lower:
+    if "file-qr-generator" in lower or "file-qr-gui" in lower:
         return ("tool", "universal")
     if "windows-x64" in lower:
         return ("windows", "x64")

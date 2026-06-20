@@ -1,0 +1,173 @@
+name: Build File QR GUI
+
+permissions:
+  contents: write
+
+on:
+  push:
+    branches: [ master, main ]
+    tags:
+      - 'v*'
+    paths:
+      - 'voice-input-file-qr-gui/**'
+      - 'VoiceInputApp/app/src/main/cpp/libcimbar/**'
+      - '.github/workflows/build-file-qr-gui.yml'
+  pull_request:
+    branches: [ master, main ]
+    paths:
+      - 'voice-input-file-qr-gui/**'
+      - 'VoiceInputApp/app/src/main/cpp/libcimbar/**'
+      - '.github/workflows/build-file-qr-gui.yml'
+  workflow_dispatch:
+
+env:
+  PACKAGE_VERSION: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || format('dev-{0}', github.run_number) }}
+
+jobs:
+  build-windows:
+    name: Build Windows ${{ matrix.arch }}
+    runs-on: windows-2022
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x64
+            cmake_arch: x64
+            triplet: x64-windows-static
+          - arch: x86
+            cmake_arch: Win32
+            triplet: x86-windows-static
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Cache vcpkg
+        uses: actions/cache@v4
+        with:
+          path: |
+            ${{ runner.temp }}\vcpkg\installed
+            ${{ runner.temp }}\vcpkg\downloads
+            ${{ runner.temp }}\vcpkg\buildtrees
+          key: file-qr-gui-vcpkg-${{ runner.os }}-${{ matrix.triplet }}-${{ hashFiles('voice-input-file-qr-gui/CMakeLists.txt') }}
+          restore-keys: |
+            file-qr-gui-vcpkg-${{ runner.os }}-${{ matrix.triplet }}-
+
+      - name: Install dependencies
+        shell: pwsh
+        run: |
+          $vcpkgRoot = Join-Path $env:RUNNER_TEMP 'vcpkg'
+          if (!(Test-Path (Join-Path $vcpkgRoot 'bootstrap-vcpkg.bat'))) {
+            if (Test-Path $vcpkgRoot) {
+              Remove-Item -Recurse -Force $vcpkgRoot
+            }
+            git clone https://github.com/microsoft/vcpkg.git $vcpkgRoot
+          }
+          & "$vcpkgRoot\bootstrap-vcpkg.bat"
+          & "$vcpkgRoot\vcpkg.exe" install "wxwidgets:${{ matrix.triplet }}" "opencv4[png,jpeg]:${{ matrix.triplet }}"
+          "VCPKG_ROOT=$vcpkgRoot" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Configure
+        shell: pwsh
+        run: |
+          cmake -S voice-input-file-qr-gui -B "build/file-qr-gui-${{ matrix.arch }}" `
+            -G "Visual Studio 17 2022" `
+            -A "${{ matrix.cmake_arch }}" `
+            -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" `
+            -DVCPKG_TARGET_TRIPLET="${{ matrix.triplet }}"
+
+      - name: Build
+        shell: pwsh
+        run: cmake --build "build/file-qr-gui-${{ matrix.arch }}" --config Release --parallel
+
+      - name: Package
+        shell: pwsh
+        run: |
+          $version = "${env:PACKAGE_VERSION}".TrimStart('v')
+          $packageName = "voiceinput-file-qr-gui-windows-${{ matrix.arch }}-v$version"
+          $packageDir = Join-Path "release-assets" $packageName
+          New-Item -ItemType Directory -Force -Path $packageDir | Out-Null
+          Copy-Item "build/file-qr-gui-${{ matrix.arch }}/Release/voiceinput-file-qr-gui.exe" $packageDir
+          Copy-Item "voice-input-file-qr-gui/README.md" $packageDir
+          Compress-Archive -Path "$packageDir/*" -DestinationPath "release-assets/$packageName.zip" -CompressionLevel Optimal
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: voiceinput-file-qr-gui-windows-${{ matrix.arch }}
+          path: release-assets/voiceinput-file-qr-gui-windows-${{ matrix.arch }}-v*.zip
+          if-no-files-found: error
+
+  build-linux:
+    name: Build Linux ${{ matrix.arch }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x64
+            runner: ubuntu-24.04
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential \
+            cmake \
+            ninja-build \
+            pkg-config \
+            libwxgtk3.2-dev \
+            libopencv-dev
+
+      - name: Configure
+        run: |
+          cmake -S voice-input-file-qr-gui -B "build/file-qr-gui-linux-${{ matrix.arch }}" \
+            -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build
+        run: cmake --build "build/file-qr-gui-linux-${{ matrix.arch }}" --config Release --parallel
+
+      - name: Package
+        shell: bash
+        run: |
+          version="${PACKAGE_VERSION#v}"
+          package_name="voiceinput-file-qr-gui-linux-${{ matrix.arch }}-v${version}"
+          package_dir="release-assets/${package_name}"
+          mkdir -p "${package_dir}"
+          cp "build/file-qr-gui-linux-${{ matrix.arch }}/voiceinput-file-qr-gui" "${package_dir}/"
+          cp "voice-input-file-qr-gui/README.md" "${package_dir}/"
+          strip "${package_dir}/voiceinput-file-qr-gui" || true
+          tar -czf "release-assets/${package_name}.tar.gz" -C "release-assets" "${package_name}"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: voiceinput-file-qr-gui-linux-${{ matrix.arch }}
+          path: release-assets/voiceinput-file-qr-gui-linux-${{ matrix.arch }}-v*.tar.gz
+          if-no-files-found: error
+
+  create-release:
+    name: Upload Release Assets
+    needs: [build-windows, build-linux]
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Upload to GitHub Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: artifacts/**/*
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
