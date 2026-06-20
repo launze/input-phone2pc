@@ -129,6 +129,7 @@ jobs:
             bison \
             gperf \
             libtool \
+            libltdl-dev \
             libx11-dev \
             libxext-dev \
             libxrender-dev \
