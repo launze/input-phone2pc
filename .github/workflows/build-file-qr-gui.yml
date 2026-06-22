@@ -149,9 +149,9 @@ jobs:
             ${{ runner.temp }}/vcpkg/installed
             ${{ runner.temp }}/vcpkg/downloads
             ${{ runner.temp }}/vcpkg/buildtrees
-          key: file-qr-gui-vcpkg-${{ runner.os }}-${{ matrix.arch }}-${{ matrix.triplet }}-${{ hashFiles('voice-input-file-qr-gui/CMakeLists.txt') }}
+          key: file-qr-gui-vcpkg-${{ runner.os }}-${{ matrix.arch }}-${{ matrix.triplet }}-wx-core-${{ hashFiles('voice-input-file-qr-gui/CMakeLists.txt') }}
           restore-keys: |
-            file-qr-gui-vcpkg-${{ runner.os }}-${{ matrix.arch }}-${{ matrix.triplet }}-
+            file-qr-gui-vcpkg-${{ runner.os }}-${{ matrix.arch }}-${{ matrix.triplet }}-wx-core-
 
       - name: Install vcpkg dependencies
         shell: bash
@@ -172,7 +172,7 @@ jobs:
           EOF
           export VCPKG_TARGET_ARCH="${{ matrix.arch == 'arm64' && 'arm64' || 'x64' }}"
           "$vcpkg_root/vcpkg" install \
-            "wxwidgets:${{ matrix.triplet }}" \
+            "wxwidgets[core]:${{ matrix.triplet }}" \
             "opencv4[png,jpeg]:${{ matrix.triplet }}" \
             --overlay-triplets="$RUNNER_TEMP/vcpkg-triplets"
           echo "VCPKG_ROOT=$vcpkg_root" >> "$GITHUB_ENV"
