@@ -130,6 +130,8 @@ jobs:
             curl \
             ninja-build \
             pkg-config \
+            python3-venv \
+            python3-pip \
             tar \
             unzip \
             zip \
@@ -173,9 +175,9 @@ jobs:
             ${{ runner.temp }}/vcpkg/installed
             ${{ runner.temp }}/vcpkg/downloads
             ${{ runner.temp }}/vcpkg/buildtrees
-          key: file-qr-gui-vcpkg-${{ runner.os }}-${{ matrix.arch }}-${{ matrix.triplet }}-ubuntu20-autoconf272-wx-core-${{ hashFiles('voice-input-file-qr-gui/CMakeLists.txt') }}
+          key: file-qr-gui-vcpkg-${{ runner.os }}-${{ matrix.arch }}-${{ matrix.triplet }}-ubuntu20-autoconf272-python-venv-wx-core-${{ hashFiles('voice-input-file-qr-gui/CMakeLists.txt') }}
           restore-keys: |
-            file-qr-gui-vcpkg-${{ runner.os }}-${{ matrix.arch }}-${{ matrix.triplet }}-ubuntu20-autoconf272-wx-core-
+            file-qr-gui-vcpkg-${{ runner.os }}-${{ matrix.arch }}-${{ matrix.triplet }}-ubuntu20-autoconf272-python-venv-wx-core-
 
       - name: Install vcpkg dependencies
         shell: bash
