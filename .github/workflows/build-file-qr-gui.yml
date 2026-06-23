@@ -100,6 +100,8 @@ jobs:
   build-linux:
     name: Build Linux ${{ matrix.arch }}
     runs-on: ${{ matrix.runner }}
+    container:
+      image: ubuntu:20.04
     strategy:
       fail-fast: false
       matrix:
@@ -112,16 +114,26 @@ jobs:
             triplet: arm64-linux-static-gui
 
     steps:
+      - name: Prepare container
+        run: |
+          apt-get update
+          DEBIAN_FRONTEND=noninteractive apt-get install -y git ca-certificates
+
       - uses: actions/checkout@v4
 
       - name: Install system dependencies
         run: |
-          sudo apt-get update
-          sudo apt-get install -y \
+          apt-get update
+          DEBIAN_FRONTEND=noninteractive apt-get install -y \
             build-essential \
             cmake \
+            curl \
             ninja-build \
             pkg-config \
+            tar \
+            unzip \
+            zip \
+            zstd \
             autoconf \
             autoconf-archive \
             automake \
@@ -149,9 +161,9 @@ jobs:
             ${{ runner.temp }}/vcpkg/installed
             ${{ runner.temp }}/vcpkg/downloads
             ${{ runner.temp }}/vcpkg/buildtrees
-          key: file-qr-gui-vcpkg-${{ runner.os }}-${{ matrix.arch }}-${{ matrix.triplet }}-wx-core-${{ hashFiles('voice-input-file-qr-gui/CMakeLists.txt') }}
+          key: file-qr-gui-vcpkg-${{ runner.os }}-${{ matrix.arch }}-${{ matrix.triplet }}-ubuntu20-wx-core-${{ hashFiles('voice-input-file-qr-gui/CMakeLists.txt') }}
           restore-keys: |
-            file-qr-gui-vcpkg-${{ runner.os }}-${{ matrix.arch }}-${{ matrix.triplet }}-wx-core-
+            file-qr-gui-vcpkg-${{ runner.os }}-${{ matrix.arch }}-${{ matrix.triplet }}-ubuntu20-wx-core-
 
       - name: Install vcpkg dependencies
         shell: bash
@@ -183,6 +195,7 @@ jobs:
           cmake -S voice-input-file-qr-gui -B "build/file-qr-gui-linux-${{ matrix.arch }}" \
             -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_EXE_LINKER_FLAGS="-static-libstdc++ -static-libgcc" \
             -DCMAKE_TOOLCHAIN_FILE="$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" \
             -DVCPKG_TARGET_TRIPLET="${{ matrix.triplet }}" \
             -DVCPKG_OVERLAY_TRIPLETS="$VCPKG_OVERLAY_TRIPLETS"
