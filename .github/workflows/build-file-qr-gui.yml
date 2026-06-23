@@ -121,11 +121,6 @@ jobs:
 
       - uses: actions/checkout@v4
 
-      - name: Setup Python for vcpkg
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-
       - name: Install system dependencies
         run: |
           apt-get update
@@ -180,17 +175,13 @@ jobs:
             ${{ runner.temp }}/vcpkg/installed
             ${{ runner.temp }}/vcpkg/downloads
             ${{ runner.temp }}/vcpkg/buildtrees
-          key: file-qr-gui-vcpkg-${{ runner.os }}-${{ matrix.arch }}-${{ matrix.triplet }}-ubuntu20-autoconf272-python311-wx-core-${{ hashFiles('voice-input-file-qr-gui/CMakeLists.txt') }}
+          key: file-qr-gui-vcpkg-${{ runner.os }}-${{ matrix.arch }}-${{ matrix.triplet }}-ubuntu20-autoconf272-minimal-opencv-wx-core-${{ hashFiles('voice-input-file-qr-gui/CMakeLists.txt') }}
           restore-keys: |
-            file-qr-gui-vcpkg-${{ runner.os }}-${{ matrix.arch }}-${{ matrix.triplet }}-ubuntu20-autoconf272-python311-wx-core-
+            file-qr-gui-vcpkg-${{ runner.os }}-${{ matrix.arch }}-${{ matrix.triplet }}-ubuntu20-autoconf272-minimal-opencv-wx-core-
 
       - name: Install vcpkg dependencies
         shell: bash
         run: |
-          python3 --version
-          which python3
-          export Python3_EXECUTABLE="$(which python3)"
-          export Python3_ROOT_DIR="$(dirname "$(dirname "$Python3_EXECUTABLE")")"
           vcpkg_root="$RUNNER_TEMP/vcpkg"
           if [ ! -x "$vcpkg_root/vcpkg" ]; then
             rm -rf "$vcpkg_root"
@@ -204,15 +195,11 @@ jobs:
           set(VCPKG_LIBRARY_LINKAGE static)
           set(VCPKG_CMAKE_SYSTEM_NAME Linux)
           set(X_VCPKG_FORCE_VCPKG_X_LIBRARIES ON)
-          if(DEFINED ENV{Python3_EXECUTABLE})
-            set(Python3_EXECUTABLE "$ENV{Python3_EXECUTABLE}" CACHE FILEPATH "")
-            set(Python_EXECUTABLE "$ENV{Python3_EXECUTABLE}" CACHE FILEPATH "")
-          endif()
           EOF
           export VCPKG_TARGET_ARCH="${{ matrix.arch == 'arm64' && 'arm64' || 'x64' }}"
           "$vcpkg_root/vcpkg" install \
             "wxwidgets[core]:${{ matrix.triplet }}" \
-            "opencv4[png,jpeg]:${{ matrix.triplet }}" \
+            "opencv4[core,imgproc,imgcodecs,photo,png,jpeg]:${{ matrix.triplet }}" \
             --overlay-triplets="$RUNNER_TEMP/vcpkg-triplets"
           echo "VCPKG_ROOT=$vcpkg_root" >> "$GITHUB_ENV"
           echo "VCPKG_OVERLAY_TRIPLETS=$RUNNER_TEMP/vcpkg-triplets" >> "$GITHUB_ENV"
