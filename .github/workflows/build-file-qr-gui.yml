@@ -106,12 +106,10 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - arch: x64
+          - arch: amd64
             runner: ubuntu-24.04
-            triplet: x64-linux-static-gui
           - arch: arm64
             runner: ubuntu-24.04-arm
-            triplet: arm64-linux-static-gui
 
     steps:
       - name: Prepare container
@@ -128,91 +126,24 @@ jobs:
             build-essential \
             cmake \
             curl \
+            file \
             ninja-build \
+            patchelf \
             pkg-config \
-            python3-venv \
-            python3-pip \
             tar \
             unzip \
             zip \
-            zstd \
-            autoconf \
-            autoconf-archive \
-            automake \
-            autopoint \
-            bison \
-            gperf \
-            libtool \
-            libltdl-dev \
-            m4 \
-            libx11-dev \
-            libxext-dev \
-            libxrender-dev \
-            libxrandr-dev \
-            libxinerama-dev \
-            libxcursor-dev \
-            libxi-dev \
-            libxfixes-dev \
-            xz-utils \
-            libgl1-mesa-dev \
-            libglu1-mesa-dev \
+            binutils \
+            libwxgtk3.0-gtk3-dev \
+            libopencv-dev \
             libgtk-3-dev
-
-      - name: Install Autoconf 2.72
-        run: |
-          curl -fsSL https://ftp.gnu.org/gnu/autoconf/autoconf-2.72.tar.xz -o /tmp/autoconf-2.72.tar.xz
-          tar -xf /tmp/autoconf-2.72.tar.xz -C /tmp
-          cd /tmp/autoconf-2.72
-          ./configure --prefix=/usr/local
-          make -j"$(nproc)"
-          make install
-          autoconf --version
-
-      - name: Cache vcpkg
-        uses: actions/cache@v4
-        with:
-          path: |
-            ${{ runner.temp }}/vcpkg/installed
-            ${{ runner.temp }}/vcpkg/downloads
-            ${{ runner.temp }}/vcpkg/buildtrees
-          key: file-qr-gui-vcpkg-${{ runner.os }}-${{ matrix.arch }}-${{ matrix.triplet }}-ubuntu20-autoconf272-minimal-opencv-wx-core-${{ hashFiles('voice-input-file-qr-gui/CMakeLists.txt') }}
-          restore-keys: |
-            file-qr-gui-vcpkg-${{ runner.os }}-${{ matrix.arch }}-${{ matrix.triplet }}-ubuntu20-autoconf272-minimal-opencv-wx-core-
-
-      - name: Install vcpkg dependencies
-        shell: bash
-        run: |
-          vcpkg_root="$RUNNER_TEMP/vcpkg"
-          if [ ! -x "$vcpkg_root/vcpkg" ]; then
-            rm -rf "$vcpkg_root"
-            git clone https://github.com/microsoft/vcpkg.git "$vcpkg_root"
-          fi
-          "$vcpkg_root/bootstrap-vcpkg.sh"
-          mkdir -p "$RUNNER_TEMP/vcpkg-triplets"
-          cat > "$RUNNER_TEMP/vcpkg-triplets/${{ matrix.triplet }}.cmake" <<'EOF'
-          set(VCPKG_TARGET_ARCHITECTURE $ENV{VCPKG_TARGET_ARCH})
-          set(VCPKG_CRT_LINKAGE dynamic)
-          set(VCPKG_LIBRARY_LINKAGE static)
-          set(VCPKG_CMAKE_SYSTEM_NAME Linux)
-          set(X_VCPKG_FORCE_VCPKG_X_LIBRARIES ON)
-          EOF
-          export VCPKG_TARGET_ARCH="${{ matrix.arch == 'arm64' && 'arm64' || 'x64' }}"
-          "$vcpkg_root/vcpkg" install \
-            "wxwidgets[core]:${{ matrix.triplet }}" \
-            "opencv4[core,imgproc,imgcodecs,photo,png,jpeg]:${{ matrix.triplet }}" \
-            --overlay-triplets="$RUNNER_TEMP/vcpkg-triplets"
-          echo "VCPKG_ROOT=$vcpkg_root" >> "$GITHUB_ENV"
-          echo "VCPKG_OVERLAY_TRIPLETS=$RUNNER_TEMP/vcpkg-triplets" >> "$GITHUB_ENV"
 
       - name: Configure
         run: |
           cmake -S voice-input-file-qr-gui -B "build/file-qr-gui-linux-${{ matrix.arch }}" \
             -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_EXE_LINKER_FLAGS="-static-libstdc++ -static-libgcc" \
-            -DCMAKE_TOOLCHAIN_FILE="$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" \
-            -DVCPKG_TARGET_TRIPLET="${{ matrix.triplet }}" \
-            -DVCPKG_OVERLAY_TRIPLETS="$VCPKG_OVERLAY_TRIPLETS"
+            -DCMAKE_EXE_LINKER_FLAGS="-static-libstdc++ -static-libgcc"
 
       - name: Build
         run: cmake --build "build/file-qr-gui-linux-${{ matrix.arch }}" --config Release --parallel
@@ -221,13 +152,12 @@ jobs:
         shell: bash
         run: |
           version="${PACKAGE_VERSION#v}"
-          package_name="voiceinput-file-qr-gui-linux-${{ matrix.arch }}-v${version}"
-          package_dir="release-assets/${package_name}"
-          mkdir -p "${package_dir}"
-          cp "build/file-qr-gui-linux-${{ matrix.arch }}/voiceinput-file-qr-gui" "${package_dir}/"
-          cp "voice-input-file-qr-gui/README.md" "${package_dir}/"
-          strip "${package_dir}/voiceinput-file-qr-gui" || true
-          tar -czf "release-assets/${package_name}.tar.gz" -C "release-assets" "${package_name}"
+          chmod +x voice-input-file-qr-gui/package-linux-portable.sh
+          voice-input-file-qr-gui/package-linux-portable.sh \
+            "${{ matrix.arch }}" \
+            "$version" \
+            "build/file-qr-gui-linux-${{ matrix.arch }}" \
+            "release-assets"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
