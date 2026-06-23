@@ -142,6 +142,7 @@ jobs:
             gperf \
             libtool \
             libltdl-dev \
+            m4 \
             libx11-dev \
             libxext-dev \
             libxrender-dev \
@@ -150,9 +151,20 @@ jobs:
             libxcursor-dev \
             libxi-dev \
             libxfixes-dev \
+            xz-utils \
             libgl1-mesa-dev \
             libglu1-mesa-dev \
             libgtk-3-dev
+
+      - name: Install Autoconf 2.72
+        run: |
+          curl -fsSL https://ftp.gnu.org/gnu/autoconf/autoconf-2.72.tar.xz -o /tmp/autoconf-2.72.tar.xz
+          tar -xf /tmp/autoconf-2.72.tar.xz -C /tmp
+          cd /tmp/autoconf-2.72
+          ./configure --prefix=/usr/local
+          make -j"$(nproc)"
+          make install
+          autoconf --version
 
       - name: Cache vcpkg
         uses: actions/cache@v4
@@ -161,9 +173,9 @@ jobs:
             ${{ runner.temp }}/vcpkg/installed
             ${{ runner.temp }}/vcpkg/downloads
             ${{ runner.temp }}/vcpkg/buildtrees
-          key: file-qr-gui-vcpkg-${{ runner.os }}-${{ matrix.arch }}-${{ matrix.triplet }}-ubuntu20-wx-core-${{ hashFiles('voice-input-file-qr-gui/CMakeLists.txt') }}
+          key: file-qr-gui-vcpkg-${{ runner.os }}-${{ matrix.arch }}-${{ matrix.triplet }}-ubuntu20-autoconf272-wx-core-${{ hashFiles('voice-input-file-qr-gui/CMakeLists.txt') }}
           restore-keys: |
-            file-qr-gui-vcpkg-${{ runner.os }}-${{ matrix.arch }}-${{ matrix.triplet }}-ubuntu20-wx-core-
+            file-qr-gui-vcpkg-${{ runner.os }}-${{ matrix.arch }}-${{ matrix.triplet }}-ubuntu20-autoconf272-wx-core-
 
       - name: Install vcpkg dependencies
         shell: bash
