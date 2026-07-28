@@ -38,7 +38,7 @@ pub struct OpenAiConfig {
 impl Default for AppConfig {
     fn default() -> Self {
         Self {
-            server_mode_enabled: false,
+            server_mode_enabled: true,
             server_url: DEFAULT_SERVER_URL.to_string(),
             device_id: uuid::Uuid::new_v4().to_string(),
             device_name: hostname::get()

@@ -190,6 +190,10 @@ async fn handle_input_message(
     let (from_device_id, from_device_name) = peer
         .map(|(device_id, device_name)| (device_id.clone(), device_name.clone()))
         .unwrap_or_else(|| ("未知设备".to_string(), "Android 设备".to_string()));
+    let history_category = message
+        .get("category")
+        .and_then(|v| v.as_str())
+        .map(str::to_string);
 
     match msg_type {
         "TEXT_INPUT" => {
@@ -212,6 +216,7 @@ async fn handle_input_message(
                     via: via.to_string(),
                     delivery_mode: history_delivery_mode.clone(),
                     metadata: None,
+                    category: history_category.clone(),
                 };
                 if let Ok((stored, inserted)) = history::record_message(record) {
                     if inserted {
@@ -273,6 +278,7 @@ async fn handle_input_message(
                 via: via.to_string(),
                 delivery_mode: "live".to_string(),
                 metadata,
+                category: history_category.clone(),
             };
             if let Ok((stored, inserted)) = history::record_message(record) {
                 if inserted {
@@ -341,6 +347,7 @@ async fn handle_input_message(
                 via: via.to_string(),
                 delivery_mode: "live".to_string(),
                 metadata: Some(metadata),
+                category: None,
             };
             if let Ok((stored, inserted)) = history::record_message(record) {
                 if inserted {

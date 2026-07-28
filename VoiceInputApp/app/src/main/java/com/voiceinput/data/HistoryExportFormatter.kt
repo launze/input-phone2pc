@@ -29,6 +29,9 @@ object HistoryExportFormatter {
             builder.appendLine("类型: ${item.contentType}")
             builder.appendLine("状态: ${syncStatusLabel(item.syncStatus)}")
             builder.appendLine("通道: ${item.channel}")
+            if (item.category.isNotBlank()) {
+                builder.appendLine("目录: ${item.category}")
+            }
             if (item.isPinned) {
                 builder.appendLine("置顶: 是")
             }
@@ -79,6 +82,9 @@ object HistoryExportFormatter {
             builder.appendLine("- 类型: ${item.contentType}")
             builder.appendLine("- 状态: ${syncStatusLabel(item.syncStatus)}")
             builder.appendLine("- 通道: ${item.channel}")
+            if (item.category.isNotBlank()) {
+                builder.appendLine("- 目录: ${item.category}")
+            }
             if (item.isPinned) {
                 builder.appendLine("- 置顶: 是")
             }
@@ -117,7 +123,7 @@ object HistoryExportFormatter {
     fun buildCsv(items: List<HistoryItem>): String {
         val dateFormat = exportDateFormat()
         val builder = StringBuilder()
-        builder.appendLine("id,timestamp,target_device_id,target_device_name,status,channel,content_type,source_app,source_package,server_message_id,stored_at,synced_at,favorite,pinned,tags,metadata,error_message,text")
+        builder.appendLine("id,timestamp,target_device_id,target_device_name,status,channel,content_type,category,source_app,source_package,server_message_id,stored_at,synced_at,favorite,pinned,tags,metadata,error_message,text")
         sortedForExport(items).forEach { item ->
             builder.appendLine(
                 listOf(
@@ -128,6 +134,7 @@ object HistoryExportFormatter {
                     syncStatusLabel(item.syncStatus),
                     item.channel,
                     item.contentType,
+                    item.category,
                     item.sourceApp,
                     item.sourcePackage,
                     item.serverMessageId.orEmpty(),

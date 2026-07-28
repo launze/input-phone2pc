@@ -624,6 +624,10 @@ fn build_history_record(
         .get("timestamp")
         .and_then(|v| v.as_i64())
         .unwrap_or(received_at);
+    let history_category = payload
+        .get("category")
+        .and_then(|v| v.as_str())
+        .map(str::to_string);
 
     match payload_type {
         "TEXT_INPUT" => payload
@@ -640,6 +644,7 @@ fn build_history_record(
                 via: via.to_string(),
                 delivery_mode: delivery_mode.to_string(),
                 metadata: None,
+                category: history_category.clone(),
             }),
         "CLIPBOARD_IMAGE" => {
             let file_name = payload
@@ -668,6 +673,7 @@ fn build_history_record(
                 via: via.to_string(),
                 delivery_mode: delivery_mode.to_string(),
                 metadata,
+                category: history_category.clone(),
             })
         }
         "CLIPBOARD_FILE" => {
@@ -698,6 +704,7 @@ fn build_history_record(
                 via: via.to_string(),
                 delivery_mode: delivery_mode.to_string(),
                 metadata: Some(metadata),
+                category: history_category,
             })
         }
         "NOTIFICATION_INPUT" => {
@@ -745,6 +752,7 @@ fn build_history_record(
                 via: via.to_string(),
                 delivery_mode: delivery_mode.to_string(),
                 metadata: Some(metadata),
+                category: None,
             })
         }
         _ => None,

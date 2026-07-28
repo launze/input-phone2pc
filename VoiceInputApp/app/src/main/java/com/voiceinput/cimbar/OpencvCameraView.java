@@ -10,13 +10,10 @@ import android.hardware.Camera.PreviewCallback;
 import android.os.Build;
 import android.util.AttributeSet;
 import android.util.Log;
-import android.view.Surface;
 import android.view.ViewGroup.LayoutParams;
-import android.view.WindowManager;
 
 import org.opencv.BuildConfig;
 import org.opencv.android.CameraBridgeViewBase;
-import org.opencv.core.Core;
 import org.opencv.core.CvType;
 import org.opencv.core.Mat;
 import org.opencv.core.Size;
@@ -47,8 +44,6 @@ public class OpencvCameraView extends CameraBridgeViewBase implements PreviewCal
     protected JavaCameraFrame[] mCameraFrame;
     private SurfaceTexture mSurfaceTexture;
     private int mPreviewFormat = ImageFormat.NV21;
-    private int mFrameRotation = 0;
-    private int mOpenedCameraIndex = -1;
 
     public static class JavaCameraSizeAccessor implements ListItemAccessor {
 
@@ -178,7 +173,6 @@ public class OpencvCameraView extends CameraBridgeViewBase implements PreviewCal
                 Log.d(TAG, "Trying to open camera with old open()");
                 try {
                     mCamera = Camera.open();
-                    mOpenedCameraIndex = 0;
                 }
                 catch (Exception e){
                     Log.e(TAG, "Camera is not available (in use or does not exist): " + e.getLocalizedMessage());
@@ -190,7 +184,6 @@ public class OpencvCameraView extends CameraBridgeViewBase implements PreviewCal
                         Log.d(TAG, "Trying to open camera with new open(" + Integer.valueOf(camIdx) + ")");
                         try {
                             mCamera = Camera.open(camIdx);
-                            mOpenedCameraIndex = camIdx;
                             connected = true;
                         } catch (RuntimeException e) {
                             Log.e(TAG, "Camera #" + camIdx + "failed to open: " + e.getLocalizedMessage());
@@ -230,7 +223,6 @@ public class OpencvCameraView extends CameraBridgeViewBase implements PreviewCal
                         Log.d(TAG, "Trying to open camera with new open(" + Integer.valueOf(localCameraIndex) + ")");
                         try {
                             mCamera = Camera.open(localCameraIndex);
-                            mOpenedCameraIndex = localCameraIndex;
                         } catch (RuntimeException e) {
                             Log.e(TAG, "Camera #" + localCameraIndex + "failed to open: " + e.getLocalizedMessage());
                         }
@@ -284,12 +276,8 @@ public class OpencvCameraView extends CameraBridgeViewBase implements PreviewCal
                     mCamera.setParameters(params);
                     params = mCamera.getParameters();
 
-                    int previewWidth = params.getPreviewSize().width;
-                    int previewHeight = params.getPreviewSize().height;
-                    mFrameRotation = getFrameRotation(width, height, previewWidth, previewHeight);
-                    boolean swapsDimensions = mFrameRotation == 90 || mFrameRotation == 270;
-                    mFrameWidth = swapsDimensions ? previewHeight : previewWidth;
-                    mFrameHeight = swapsDimensions ? previewWidth : previewHeight;
+                    mFrameWidth = params.getPreviewSize().width;
+                    mFrameHeight = params.getPreviewSize().height;
 
                     if ((getLayoutParams().width == LayoutParams.MATCH_PARENT) && (getLayoutParams().height == LayoutParams.MATCH_PARENT))
                         mScale = Math.min(((float)height)/mFrameHeight, ((float)width)/mFrameWidth);
@@ -300,7 +288,7 @@ public class OpencvCameraView extends CameraBridgeViewBase implements PreviewCal
                         mFpsMeter.setResolution(mFrameWidth, mFrameHeight);
                     }
 
-                    int size = previewWidth * previewHeight;
+                    int size = mFrameWidth * mFrameHeight;
                     size  = size * ImageFormat.getBitsPerPixel(params.getPreviewFormat()) / 8;
                     mBuffer = new byte[size];
 
@@ -308,14 +296,14 @@ public class OpencvCameraView extends CameraBridgeViewBase implements PreviewCal
                     mCamera.setPreviewCallbackWithBuffer(this);
 
                     mFrameChain = new Mat[2];
-                    mFrameChain[0] = new Mat(previewHeight + (previewHeight/2), previewWidth, CvType.CV_8UC1);
-                    mFrameChain[1] = new Mat(previewHeight + (previewHeight/2), previewWidth, CvType.CV_8UC1);
+                    mFrameChain[0] = new Mat(mFrameHeight + (mFrameHeight/2), mFrameWidth, CvType.CV_8UC1);
+                    mFrameChain[1] = new Mat(mFrameHeight + (mFrameHeight/2), mFrameWidth, CvType.CV_8UC1);
 
                     AllocateCache();
 
                     mCameraFrame = new JavaCameraFrame[2];
-                    mCameraFrame[0] = new JavaCameraFrame(mFrameChain[0], previewWidth, previewHeight);
-                    mCameraFrame[1] = new JavaCameraFrame(mFrameChain[1], previewWidth, previewHeight);
+                    mCameraFrame[0] = new JavaCameraFrame(mFrameChain[0], mFrameWidth, mFrameHeight);
+                    mCameraFrame[1] = new JavaCameraFrame(mFrameChain[1], mFrameWidth, mFrameHeight);
 
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.HONEYCOMB) {
                         mSurfaceTexture = new SurfaceTexture(MAGIC_TEXTURE_ID);
@@ -347,7 +335,6 @@ public class OpencvCameraView extends CameraBridgeViewBase implements PreviewCal
                 mCamera.release();
             }
             mCamera = null;
-            mOpenedCameraIndex = -1;
             if (mFrameChain != null) {
                 mFrameChain[0].release();
                 mFrameChain[1].release();
@@ -438,16 +425,6 @@ public class OpencvCameraView extends CameraBridgeViewBase implements PreviewCal
             else
                 throw new IllegalArgumentException("Preview Format can be NV21 or YV12");
 
-            if (mFrameRotation == 90) {
-                Core.rotate(mRgba, mRotatedRgba, Core.ROTATE_90_CLOCKWISE);
-                return mRotatedRgba;
-            } else if (mFrameRotation == 180) {
-                Core.rotate(mRgba, mRotatedRgba, Core.ROTATE_180);
-                return mRotatedRgba;
-            } else if (mFrameRotation == 270) {
-                Core.rotate(mRgba, mRotatedRgba, Core.ROTATE_90_COUNTERCLOCKWISE);
-                return mRotatedRgba;
-            }
             return mRgba;
         }
 
@@ -457,59 +434,17 @@ public class OpencvCameraView extends CameraBridgeViewBase implements PreviewCal
             mHeight = height;
             mYuvFrameData = Yuv420sp;
             mRgba = new Mat();
-            mRotatedRgba = new Mat();
         }
 
         public void release() {
             mRgba.release();
-            mRotatedRgba.release();
         }
 
         private Mat mYuvFrameData;
         private Mat mRgba;
-        private Mat mRotatedRgba;
         private int mWidth;
         private int mHeight;
     };
-
-    private int getFrameRotation(int surfaceWidth, int surfaceHeight, int previewWidth, int previewHeight) {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.GINGERBREAD || mOpenedCameraIndex < 0) {
-            return surfaceHeight > surfaceWidth && previewWidth > previewHeight ? 90 : 0;
-        }
-
-        Camera.CameraInfo info = new Camera.CameraInfo();
-        try {
-            Camera.getCameraInfo(mOpenedCameraIndex, info);
-        } catch (RuntimeException e) {
-            Log.e(TAG, "Unable to read camera info: " + e.getLocalizedMessage());
-            return surfaceHeight > surfaceWidth && previewWidth > previewHeight ? 90 : 0;
-        }
-
-        int displayDegrees = 0;
-        WindowManager windowManager = (WindowManager) getContext().getSystemService(Context.WINDOW_SERVICE);
-        if (windowManager != null && windowManager.getDefaultDisplay() != null) {
-            switch (windowManager.getDefaultDisplay().getRotation()) {
-                case Surface.ROTATION_90:
-                    displayDegrees = 90;
-                    break;
-                case Surface.ROTATION_180:
-                    displayDegrees = 180;
-                    break;
-                case Surface.ROTATION_270:
-                    displayDegrees = 270;
-                    break;
-                case Surface.ROTATION_0:
-                default:
-                    displayDegrees = 0;
-                    break;
-            }
-        }
-
-        if (info.facing == Camera.CameraInfo.CAMERA_FACING_FRONT) {
-            return (360 - ((info.orientation + displayDegrees) % 360)) % 360;
-        }
-        return (info.orientation - displayDegrees + 360) % 360;
-    }
 
     private class CameraWorker implements Runnable {
 

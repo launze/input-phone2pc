@@ -10,6 +10,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.compose.NavHost
@@ -23,7 +24,9 @@ import com.voiceinput.ui.screens.FileQrScannerScreen
 import com.voiceinput.ui.screens.QrScannerScreen
 import com.voiceinput.ui.screens.SettingsScreen
 import com.voiceinput.ui.theme.VoiceInputTheme
+import com.voiceinput.update.AppUpdateManager
 import com.voiceinput.viewmodel.InputViewModel
+import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
     private var initialRoute: String = "input"
@@ -73,6 +76,9 @@ fun MainScreen(
 ) {
     val navController = rememberNavController()
     val viewModel: InputViewModel = viewModel()
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val updateManager = remember { AppUpdateManager(context) }
+    val snackbarHostState = remember { SnackbarHostState() }
 
     LaunchedEffect(pendingRoute) {
         val route = pendingRoute ?: return@LaunchedEffect
@@ -83,21 +89,33 @@ fun MainScreen(
         onPendingRouteConsumed()
     }
 
-    NavHost(
-        navController = navController,
-        startDestination = initialRoute
-    ) {
-        composable(AppRoutes.INPUT) {
-            InputScreen(
-                viewModel = viewModel,
-                onNavigateToSettings = { navController.navigate(AppRoutes.SETTINGS) },
-                onNavigateToScanner = { navController.navigate("scanner") },
-                onNavigateToFileScanner = { navController.navigate("file_scanner") },
-                onNavigateToHistory = { navController.navigate(AppRoutes.HISTORY) },
-                onNavigateToNotifications = { navController.navigate(AppRoutes.NOTIFICATIONS) },
-                onNavigateToAi = { navController.navigate(AppRoutes.AI_ASSISTANT) }
-            )
+    LaunchedEffect(Unit) {
+        launch {
+            runCatching { updateManager.checkUpdate() }
+                .onSuccess { info ->
+                    if (info.hasUpdate) {
+                        snackbarHostState.showSnackbar("发现新版本 v${info.latestVersion}，可在设置中下载更新")
+                    }
+                }
         }
+    }
+
+    Box(Modifier.fillMaxSize()) {
+            NavHost(
+                navController = navController,
+                startDestination = initialRoute
+            ) {
+                composable(AppRoutes.INPUT) {
+                    InputScreen(
+                        viewModel = viewModel,
+                        onNavigateToSettings = { navController.navigate(AppRoutes.SETTINGS) },
+                        onNavigateToScanner = { navController.navigate("scanner") },
+                        onNavigateToFileScanner = { navController.navigate("file_scanner") },
+                        onNavigateToHistory = { navController.navigate(AppRoutes.HISTORY) },
+                        onNavigateToNotifications = { navController.navigate(AppRoutes.NOTIFICATIONS) },
+                        onNavigateToAi = { navController.navigate(AppRoutes.AI_ASSISTANT) }
+                    )
+                }
 
         composable(AppRoutes.AI_ASSISTANT) {
             AiAssistantScreen(
@@ -149,8 +167,8 @@ fun MainScreen(
 
         composable("scanner") {
             QrScannerScreen(
-                onScanResult = { serverUrl, deviceId, deviceName, localIp, localPort ->
-                    viewModel.handleQrScanResult(serverUrl, deviceId, deviceName, localIp, localPort)
+                onScanResult = { serverUrl, deviceId, deviceName, localIp, localPort, pairingMode ->
+                    viewModel.handleQrScanResult(serverUrl, deviceId, deviceName, localIp, localPort, pairingMode)
                     navController.popBackStack()
                 },
                 onBack = { navController.popBackStack() }
@@ -165,5 +183,10 @@ fun MainScreen(
                 onBack = { navController.popBackStack() }
             )
         }
+            }
+        SnackbarHost(
+            hostState = snackbarHostState,
+            modifier = Modifier.align(Alignment.BottomCenter)
+        )
     }
 }

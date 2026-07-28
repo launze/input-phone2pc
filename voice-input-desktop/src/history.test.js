@@ -57,7 +57,8 @@ test('renderHistoryItem escapes content and shows productivity actions', () => {
         delivery_mode: 'manual',
         favorite: true,
         pinned: true,
-        tags: '工作,待办'
+        tags: '工作,待办',
+        category: '会议'
     }, {
         selectionMode: true,
         selectedIds: new Set(['record-1'])
@@ -68,6 +69,7 @@ test('renderHistoryItem escapes content and shows productivity actions', () => {
     assert.match(html, /待手动插入/);
     assert.match(html, /收藏/);
     assert.match(html, /置顶/);
+    assert.match(html, /会议/);
     assert.match(html, /#工作/);
     assert.match(html, /data-action="insert"/);
     assert.match(html, /data-action="edit"/);
@@ -139,7 +141,8 @@ test('filterHistoryRecords separates history and notification tabs with metadata
             delivery_mode: 'manual',
             favorite: true,
             pinned: false,
-            tags: '工作'
+            tags: '工作',
+            category: '会议'
         },
         {
             id: 'notification-1',
@@ -167,7 +170,8 @@ test('filterHistoryRecords separates history and notification tabs with metadata
             delivery_mode: 'offline_sync',
             favorite: false,
             pinned: false,
-            tags: '文件'
+            tags: '文件',
+            category: '资料'
         }
     ];
 
@@ -185,7 +189,7 @@ test('filterHistoryRecords separates history and notification tabs with metadata
         ['notification-1']
     );
     assert.deepEqual(
-        filterHistoryRecords(records, { type: 'all', channel: 'all', device: 'all', status: 'favorite', sourceApp: 'all' }, 'history').map(item => item.id),
+        filterHistoryRecords(records, { type: 'all', channel: 'all', device: 'all', status: 'favorite', sourceApp: 'all', category: '会议' }, 'history').map(item => item.id),
         ['text-1']
     );
     assert.deepEqual(
@@ -202,7 +206,8 @@ test('AI assistant filter and scope helpers keep LLM-driven tool context explici
         device: '手机',
         status: 'pinned',
         sourceApp: '微信',
-        tag: '待办'
+        tag: '待办',
+        category: '会议'
     }, 'notifications', 80);
 
     assert.deepEqual(filters, {
@@ -215,6 +220,7 @@ test('AI assistant filter and scope helpers keep LLM-driven tool context explici
         favorite: null,
         pinned: true,
         tag: '待办',
+        category: '会议',
         limit: 80
     });
 
@@ -231,11 +237,12 @@ test('AI assistant filter and scope helpers keep LLM-driven tool context explici
     assert.match(scopeText, /范围=通知记录/);
     assert.match(scopeText, /类型=通知/);
     assert.match(scopeText, /状态=置顶/);
+    assert.match(scopeText, /目录=会议/);
     assert.match(scopeText, /LLM 会自主选择 Skill 和工具/);
 
     assert.equal(
-        buildAiSessionScopeLabel({ content_type: 'notification', record_ids: ['a', 'b'], limit: 80 }),
-        '范围：类型=notification，记录ID=2条，上限=80'
+        buildAiSessionScopeLabel({ content_type: 'notification', category: '会议', record_ids: ['a', 'b'], limit: 80 }),
+        '范围：类型=notification，目录=会议，记录ID=2条，上限=80'
     );
     assert.equal(buildAiSessionScopeLabel(null), '范围：未记录');
 });

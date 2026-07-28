@@ -74,6 +74,7 @@ fun HistoryScreen(
     onOpenAiAssistant: () -> Unit = {}
 ) {
     val historyItems by viewModel.historyItems.collectAsState()
+    val selectedInputCategory by viewModel.selectedHistoryCategory.collectAsState()
     val pairedDevices by viewModel.pairedDevices.collectAsState()
     val connectionStatus by viewModel.connectionStatus.collectAsState()
     val snackbarHostState = remember { SnackbarHostState() }
@@ -88,8 +89,11 @@ fun HistoryScreen(
     var selectedChannel by remember { mutableStateOf("all") }
     var selectedSourceApp by remember { mutableStateOf("all") }
     var selectedStatus by remember { mutableStateOf("all") }
+    var selectedCategory by remember { mutableStateOf("all") }
     var tagQuery by remember { mutableStateOf("") }
     var selectionMode by remember { mutableStateOf(false) }
+    var filtersExpanded by remember { mutableStateOf(false) }
+    var actionsExpanded by remember { mutableStateOf(false) }
     var selectedIds by remember { mutableStateOf<Set<String>>(emptySet()) }
     var showDeleteSelectedDialog by remember { mutableStateOf(false) }
     var showDeleteFilteredDialog by remember { mutableStateOf(false) }
@@ -104,6 +108,7 @@ fun HistoryScreen(
         selectedChannel = selectedChannel,
         selectedSourceApp = selectedSourceApp,
         selectedStatus = selectedStatus,
+        selectedCategory = if (notificationMode) "all" else selectedCategory,
         tagQuery = tagQuery
     )
     val filterResult = remember(historyItems, filterState) {
@@ -115,11 +120,21 @@ fun HistoryScreen(
     val deviceOptions = filterResult.deviceOptions
     val channelOptions = filterResult.channelOptions
     val sourceAppOptions = filterResult.sourceAppOptions
+    val categoryOptions = filterResult.categoryOptions
     val statusOptions = filterResult.statusOptions
     val filteredItems = filterResult.filteredItems
     val selectedItems = remember(filteredItems, selectedIds) {
         filteredItems.filter { it.id in selectedIds }
     }
+    val statusOptionLabels = statusOptions.toMap()
+    val activeFilterCount = listOf(
+        selectedDevice != "all",
+        selectedChannel != "all",
+        selectedSourceApp != "all",
+        selectedStatus != "all",
+        !notificationMode && selectedCategory != "all",
+        tagQuery.isNotBlank()
+    ).count { it }
     val latestHistorySignature = remember(filteredItems) {
         filteredItems.lastOrNull()?.let { item ->
             listOf(
@@ -166,7 +181,13 @@ fun HistoryScreen(
         }
     }
 
-    LaunchedEffect(selectedTab, searchQuery, selectedDevice, selectedChannel, selectedSourceApp, selectedStatus, tagQuery) {
+    LaunchedEffect(selectedInputCategory, notificationMode) {
+        if (!notificationMode) {
+            selectedCategory = selectedInputCategory
+        }
+    }
+
+    LaunchedEffect(selectedTab, searchQuery, selectedDevice, selectedChannel, selectedSourceApp, selectedStatus, selectedCategory, tagQuery) {
         initialScrollCompleted = false
         selectedIds = emptySet()
     }
@@ -238,146 +259,24 @@ fun HistoryScreen(
 
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                HistoryFilterMenu(
-                    label = "设备",
-                    selected = selectedDevice,
-                    options = deviceOptions,
-                    allLabel = "全部设备",
-                    modifier = Modifier.weight(1f)
-                ) { selectedDevice = it }
-                HistoryFilterMenu(
-                    label = "通道",
-                    selected = selectedChannel,
-                    options = channelOptions,
-                    allLabel = "全部通道",
-                    modifier = Modifier.weight(1f)
-                ) { selectedChannel = it }
-            }
-
-            if (notificationMode && sourceAppOptions.isNotEmpty()) {
-                HistoryFilterMenu(
-                    label = "来源 App",
-                    selected = selectedSourceApp,
-                    options = sourceAppOptions,
-                    allLabel = "全部 App",
-                    modifier = Modifier.fillMaxWidth()
-                ) { selectedSourceApp = it }
-            }
-
-            HistoryFilterMenu(
-                label = "状态",
-                selected = selectedStatus,
-                options = statusOptions.map { it.first },
-                allLabel = "全部状态",
-                optionLabels = statusOptions.toMap(),
-                modifier = Modifier.fillMaxWidth()
-            ) { selectedStatus = it }
-
-            OutlinedTextField(
-                value = tagQuery,
-                onValueChange = { tagQuery = it },
-                modifier = Modifier.fillMaxWidth(),
-                label = { Text("标签筛选") },
-                placeholder = { Text("输入标签关键词") },
-                singleLine = true,
-                trailingIcon = {
-                    if (tagQuery.isNotBlank()) {
-                        IconButton(onClick = { tagQuery = "" }) {
-                            Icon(Icons.Default.Clear, contentDescription = "清空标签筛选")
-                        }
-                    }
-                }
-            )
-
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                ExportButton(
-                    label = "TXT",
-                    enabled = (if (selectionMode) selectedItems else filteredItems).isNotEmpty(),
-                    modifier = Modifier.weight(1f)
-                ) {
-                    pendingExportFormat = "txt"
-                    pendingExportItems = if (selectionMode && selectedItems.isNotEmpty()) selectedItems else filteredItems
-                    pendingExportFileName = viewModel.suggestedHistoryExportFileName("txt", recordMode)
-                    exportLauncher.launch(pendingExportFileName)
-                }
-                ExportButton(
-                    label = "MD",
-                    enabled = (if (selectionMode) selectedItems else filteredItems).isNotEmpty(),
-                    modifier = Modifier.weight(1f)
-                ) {
-                    pendingExportFormat = "md"
-                    pendingExportItems = if (selectionMode && selectedItems.isNotEmpty()) selectedItems else filteredItems
-                    pendingExportFileName = viewModel.suggestedHistoryExportFileName("md", recordMode)
-                    exportLauncher.launch(pendingExportFileName)
-                }
-                ExportButton(
-                    label = "CSV",
-                    enabled = (if (selectionMode) selectedItems else filteredItems).isNotEmpty(),
-                    modifier = Modifier.weight(1f)
-                ) {
-                    pendingExportFormat = "csv"
-                    pendingExportItems = if (selectionMode && selectedItems.isNotEmpty()) selectedItems else filteredItems
-                    pendingExportFileName = viewModel.suggestedHistoryExportFileName("csv", recordMode)
-                    exportLauncher.launch(pendingExportFileName)
-                }
-            }
-
-            Row(
-                modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Button(
-                    onClick = {
-                        val targetItems = if (selectionMode && selectedItems.isNotEmpty()) selectedItems else filteredItems
-                        val selectedTabLabel = historyTabs.getOrElse(selectedTab) { "全部" }
-                        viewModel.askAiAssistant(
-                            HistoryAiScope.buildQuestion(
-                                recordMode = if (notificationMode) "通知记录" else "历史记录",
-                                selectedTabLabel = selectedTabLabel,
-                                selectedDevice = selectedDevice,
-                                selectedChannel = selectedChannel,
-                                selectedSourceApp = selectedSourceApp,
-                                selectedStatus = selectedStatus,
-                                tagQuery = tagQuery,
-                                items = targetItems
-                            ),
-                            buildHistoryAiFilters(
-                                notificationMode = notificationMode,
-                                selectedTabLabel = selectedTabLabel,
-                                selectedChannel = selectedChannel,
-                                selectedSourceApp = selectedSourceApp,
-                                selectedStatus = selectedStatus,
-                                tagQuery = tagQuery,
-                                items = targetItems
-                            ),
-                            continueCurrentSession = false
-                        )
-                        onOpenAiAssistant()
-                    },
-                    enabled = (if (selectionMode) selectedItems else filteredItems).isNotEmpty(),
+                Text(
+                    text = if (activeFilterCount == 0) "未启用额外筛选" else "已启用 $activeFilterCount 个筛选",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.weight(1f)
-                ) {
-                    Text("AI 总结")
+                )
+                OutlinedButton(onClick = { filtersExpanded = !filtersExpanded }) {
+                    Text(if (filtersExpanded) "收起筛选" else "筛选", maxLines = 1)
                 }
-                OutlinedButton(
-                    onClick = {
-                        selectionMode = !selectionMode
-                        selectedIds = emptySet()
-                    },
-                    modifier = Modifier.weight(1f)
-                ) {
-                    Icon(Icons.Default.DoneAll, contentDescription = null)
-                    Text(if (selectionMode) "退出多选" else "多选")
+                OutlinedButton(onClick = { actionsExpanded = !actionsExpanded }) {
+                    Text(if (actionsExpanded) "收起操作" else "操作", maxLines = 1)
                 }
             }
 
-            if (selectionMode) {
+            if (filtersExpanded) {
                 Column(
                     modifier = Modifier.fillMaxWidth(),
                     verticalArrangement = Arrangement.spacedBy(8.dp)
@@ -386,98 +285,271 @@ fun HistoryScreen(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        Button(
-                            onClick = {
-                                selectedIds = if (selectedIds.size == filteredItems.size) {
-                                emptySet()
-                            } else {
-                                filteredItems.map { it.id }.toSet()
+                        HistoryFilterMenu(
+                            label = "设备",
+                            selected = selectedDevice,
+                            options = deviceOptions,
+                            allLabel = "全部设备",
+                            modifier = Modifier.weight(1f)
+                        ) { selectedDevice = it }
+                        HistoryFilterMenu(
+                            label = "通道",
+                            selected = selectedChannel,
+                            options = channelOptions,
+                            allLabel = "全部通道",
+                            modifier = Modifier.weight(1f)
+                        ) { selectedChannel = it }
+                    }
+
+                    if (notificationMode && sourceAppOptions.isNotEmpty()) {
+                        HistoryFilterMenu(
+                            label = "来源 App",
+                            selected = selectedSourceApp,
+                            options = sourceAppOptions,
+                            allLabel = "全部 App",
+                            modifier = Modifier.fillMaxWidth()
+                        ) { selectedSourceApp = it }
+                    }
+
+                    if (!notificationMode) {
+                        HistoryFilterMenu(
+                            label = "目录",
+                            selected = selectedCategory,
+                            options = categoryOptions,
+                            allLabel = "全部目录",
+                            modifier = Modifier.fillMaxWidth()
+                        ) { selectedCategory = it }
+                    }
+
+                    HistoryFilterMenu(
+                        label = "状态",
+                        selected = selectedStatus,
+                        options = statusOptions.map { it.first },
+                        allLabel = "全部状态",
+                        optionLabels = statusOptionLabels,
+                        modifier = Modifier.fillMaxWidth()
+                    ) { selectedStatus = it }
+
+                    OutlinedTextField(
+                        value = tagQuery,
+                        onValueChange = { tagQuery = it },
+                        modifier = Modifier.fillMaxWidth(),
+                        label = { Text("标签筛选") },
+                        placeholder = { Text("输入标签关键词") },
+                        singleLine = true,
+                        trailingIcon = {
+                            if (tagQuery.isNotBlank()) {
+                                IconButton(onClick = { tagQuery = "" }) {
+                                    Icon(Icons.Default.Clear, contentDescription = "清空标签筛选")
+                                }
                             }
+                        }
+                    )
+
+                    TextButton(
+                        onClick = {
+                            selectedDevice = "all"
+                            selectedChannel = "all"
+                            selectedSourceApp = "all"
+                            selectedStatus = "all"
+                            selectedCategory = "all"
+                            tagQuery = ""
                         },
-                        enabled = filteredItems.isNotEmpty(),
-                        modifier = Modifier.weight(1f)
+                        enabled = activeFilterCount > 0,
+                        modifier = Modifier.align(Alignment.End)
                     ) {
-                        Text(if (selectedIds.size == filteredItems.size) "取消全选" else "全选")
-                    }
-                    Button(
-                        onClick = { showDeleteSelectedDialog = true },
-                        enabled = selectedIds.isNotEmpty(),
-                        modifier = Modifier.weight(1f)
-                    ) {
-                        Icon(Icons.Default.Delete, contentDescription = null)
-                        Text("删除选中")
-                    }
-                    }
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        OutlinedButton(
-                            onClick = {
-                                viewModel.setHistoryItemsFavorite(selectedIds, true)
-                                scope.launch {
-                                    snackbarHostState.showSnackbar("已收藏选中${if (notificationMode) "通知" else "记录"}")
-                                }
-                            },
-                            enabled = selectedIds.isNotEmpty(),
-                            modifier = Modifier.weight(1f)
-                        ) {
-                            Icon(Icons.Default.Star, contentDescription = null)
-                            Text("收藏")
-                        }
-                        OutlinedButton(
-                            onClick = {
-                                viewModel.setHistoryItemsFavorite(selectedIds, false)
-                                scope.launch {
-                                    snackbarHostState.showSnackbar("已取消收藏选中${if (notificationMode) "通知" else "记录"}")
-                                }
-                            },
-                            enabled = selectedIds.isNotEmpty(),
-                            modifier = Modifier.weight(1f)
-                        ) {
-                            Icon(Icons.Default.StarBorder, contentDescription = null)
-                            Text("取消收藏")
-                        }
-                    }
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        OutlinedButton(
-                            onClick = {
-                                viewModel.setHistoryItemsPinned(selectedIds, true)
-                                scope.launch {
-                                    snackbarHostState.showSnackbar("已置顶选中${if (notificationMode) "通知" else "记录"}")
-                                }
-                            },
-                            enabled = selectedIds.isNotEmpty(),
-                            modifier = Modifier.weight(1f)
-                        ) {
-                            Icon(Icons.Default.KeyboardArrowUp, contentDescription = null)
-                            Text("置顶")
-                        }
-                        OutlinedButton(
-                            onClick = {
-                                viewModel.setHistoryItemsPinned(selectedIds, false)
-                                scope.launch {
-                                    snackbarHostState.showSnackbar("已取消置顶选中${if (notificationMode) "通知" else "记录"}")
-                                }
-                            },
-                            enabled = selectedIds.isNotEmpty(),
-                            modifier = Modifier.weight(1f)
-                        ) {
-                            Text("取消置顶")
-                        }
+                        Text("清空筛选")
                     }
                 }
-            } else {
-                OutlinedButton(
-                    onClick = { showDeleteFilteredDialog = true },
-                    enabled = filteredItems.isNotEmpty(),
-                    modifier = Modifier.fillMaxWidth()
+            }
+
+            if (actionsExpanded || selectionMode) {
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    Icon(Icons.Default.Delete, contentDescription = null)
-                    Text("删除筛选")
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        ExportButton(
+                            label = "TXT",
+                            enabled = (if (selectionMode) selectedItems else filteredItems).isNotEmpty(),
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            pendingExportFormat = "txt"
+                            pendingExportItems = if (selectionMode && selectedItems.isNotEmpty()) selectedItems else filteredItems
+                            pendingExportFileName = viewModel.suggestedHistoryExportFileName("txt", recordMode)
+                            exportLauncher.launch(pendingExportFileName)
+                        }
+                        ExportButton(
+                            label = "MD",
+                            enabled = (if (selectionMode) selectedItems else filteredItems).isNotEmpty(),
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            pendingExportFormat = "md"
+                            pendingExportItems = if (selectionMode && selectedItems.isNotEmpty()) selectedItems else filteredItems
+                            pendingExportFileName = viewModel.suggestedHistoryExportFileName("md", recordMode)
+                            exportLauncher.launch(pendingExportFileName)
+                        }
+                        ExportButton(
+                            label = "CSV",
+                            enabled = (if (selectionMode) selectedItems else filteredItems).isNotEmpty(),
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            pendingExportFormat = "csv"
+                            pendingExportItems = if (selectionMode && selectedItems.isNotEmpty()) selectedItems else filteredItems
+                            pendingExportFileName = viewModel.suggestedHistoryExportFileName("csv", recordMode)
+                            exportLauncher.launch(pendingExportFileName)
+                        }
+                    }
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Button(
+                            onClick = {
+                                val targetItems = if (selectionMode && selectedItems.isNotEmpty()) selectedItems else filteredItems
+                                val selectedTabLabel = historyTabs.getOrElse(selectedTab) { "全部" }
+                                viewModel.askAiAssistant(
+                                    HistoryAiScope.buildQuestion(
+                                        recordMode = if (notificationMode) "通知记录" else "历史记录",
+                                        selectedTabLabel = selectedTabLabel,
+                                        selectedDevice = selectedDevice,
+                                        selectedChannel = selectedChannel,
+                                        selectedSourceApp = selectedSourceApp,
+                                        selectedStatus = selectedStatus,
+                                        tagQuery = tagQuery,
+                                        items = targetItems
+                                    ),
+                                    buildHistoryAiFilters(
+                                        notificationMode = notificationMode,
+                                        selectedTabLabel = selectedTabLabel,
+                                        selectedChannel = selectedChannel,
+                                        selectedSourceApp = selectedSourceApp,
+                                        selectedStatus = selectedStatus,
+                                        tagQuery = tagQuery,
+                                        items = targetItems
+                                    ),
+                                    continueCurrentSession = false
+                                )
+                                onOpenAiAssistant()
+                            },
+                            enabled = (if (selectionMode) selectedItems else filteredItems).isNotEmpty(),
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Text("AI 总结", maxLines = 1)
+                        }
+                        OutlinedButton(
+                            onClick = {
+                                selectionMode = !selectionMode
+                                selectedIds = emptySet()
+                            },
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Icon(Icons.Default.DoneAll, contentDescription = null)
+                            Text(if (selectionMode) "退出多选" else "多选", maxLines = 1)
+                        }
+                    }
+                    if (selectionMode) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Button(
+                                onClick = {
+                                    selectedIds = if (selectedIds.size == filteredItems.size) {
+                                        emptySet()
+                                    } else {
+                                        filteredItems.map { it.id }.toSet()
+                                    }
+                                },
+                                enabled = filteredItems.isNotEmpty(),
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Text(if (selectedIds.size == filteredItems.size) "取消全选" else "全选", maxLines = 1)
+                            }
+                            Button(
+                                onClick = { showDeleteSelectedDialog = true },
+                                enabled = selectedIds.isNotEmpty(),
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Icon(Icons.Default.Delete, contentDescription = null)
+                                Text("删除选中", maxLines = 1)
+                            }
+                        }
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            OutlinedButton(
+                                onClick = {
+                                    viewModel.setHistoryItemsFavorite(selectedIds, true)
+                                    scope.launch {
+                                        snackbarHostState.showSnackbar("已收藏选中${if (notificationMode) "通知" else "记录"}")
+                                    }
+                                },
+                                enabled = selectedIds.isNotEmpty(),
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Icon(Icons.Default.Star, contentDescription = null)
+                                Text("收藏", maxLines = 1)
+                            }
+                            OutlinedButton(
+                                onClick = {
+                                    viewModel.setHistoryItemsFavorite(selectedIds, false)
+                                    scope.launch {
+                                        snackbarHostState.showSnackbar("已取消收藏选中${if (notificationMode) "通知" else "记录"}")
+                                    }
+                                },
+                                enabled = selectedIds.isNotEmpty(),
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Icon(Icons.Default.StarBorder, contentDescription = null)
+                                Text("取消收藏", maxLines = 1)
+                            }
+                        }
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            OutlinedButton(
+                                onClick = {
+                                    viewModel.setHistoryItemsPinned(selectedIds, true)
+                                    scope.launch {
+                                        snackbarHostState.showSnackbar("已置顶选中${if (notificationMode) "通知" else "记录"}")
+                                    }
+                                },
+                                enabled = selectedIds.isNotEmpty(),
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Icon(Icons.Default.KeyboardArrowUp, contentDescription = null)
+                                Text("置顶", maxLines = 1)
+                            }
+                            OutlinedButton(
+                                onClick = {
+                                    viewModel.setHistoryItemsPinned(selectedIds, false)
+                                    scope.launch {
+                                        snackbarHostState.showSnackbar("已取消置顶选中${if (notificationMode) "通知" else "记录"}")
+                                    }
+                                },
+                                enabled = selectedIds.isNotEmpty(),
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Text("取消置顶", maxLines = 1)
+                            }
+                        }
+                    } else {
+                        OutlinedButton(
+                            onClick = { showDeleteFilteredDialog = true },
+                            enabled = filteredItems.isNotEmpty(),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Icon(Icons.Default.Delete, contentDescription = null)
+                            Text("删除筛选")
+                        }
+                    }
                 }
             }
 
@@ -521,7 +593,9 @@ fun HistoryScreen(
             } else {
                 LazyColumn(
                     state = listState,
-                    modifier = Modifier.fillMaxSize(),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .weight(1f),
                     contentPadding = PaddingValues(bottom = 24.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {

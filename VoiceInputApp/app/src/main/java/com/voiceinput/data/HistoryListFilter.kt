@@ -11,6 +11,7 @@ data class HistoryFilterState(
     val selectedChannel: String = "all",
     val selectedSourceApp: String = "all",
     val selectedStatus: String = "all",
+    val selectedCategory: String = "all",
     val tagQuery: String = ""
 )
 
@@ -23,6 +24,7 @@ data class HistoryFilterResult(
     val deviceOptions: List<String>,
     val channelOptions: List<String>,
     val sourceAppOptions: List<String>,
+    val categoryOptions: List<String>,
     val statusOptions: List<Pair<String, String>>
 )
 
@@ -50,6 +52,7 @@ object HistoryListFilter {
             deviceOptions = deviceOptions(scopedItems),
             channelOptions = channelOptions(scopedItems),
             sourceAppOptions = sourceAppOptions(scopedItems),
+            categoryOptions = categoryOptions(scopedItems),
             statusOptions = statusOptions
         )
     }
@@ -90,6 +93,13 @@ object HistoryListFilter {
     fun sourceAppOptions(items: List<HistoryItem>): List<String> {
         return items
             .mapNotNull { it.sourceApp.ifBlank { it.sourcePackage }.takeIf(String::isNotBlank) }
+            .distinct()
+            .sorted()
+    }
+
+    fun categoryOptions(items: List<HistoryItem>): List<String> {
+        return items
+            .map { it.category.ifBlank { "语音输入" } }
             .distinct()
             .sorted()
     }
@@ -138,6 +148,10 @@ object HistoryListFilter {
                     item.sourcePackage == state.selectedSourceApp
             }
             .filter { item ->
+                state.selectedCategory == "all" ||
+                    item.category.ifBlank { "语音输入" } == state.selectedCategory
+            }
+            .filter { item ->
                 state.selectedStatus == "all" || item.syncStatus.name.equals(state.selectedStatus, ignoreCase = true)
             }
             .filter { item ->
@@ -153,6 +167,7 @@ object HistoryListFilter {
                     item.contentType.contains(normalizedSearch, ignoreCase = true) ||
                     item.sourceApp.contains(normalizedSearch, ignoreCase = true) ||
                     item.sourcePackage.contains(normalizedSearch, ignoreCase = true) ||
+                    item.category.contains(normalizedSearch, ignoreCase = true) ||
                     item.tags.contains(normalizedSearch, ignoreCase = true) ||
                     item.metadata.contains(normalizedSearch, ignoreCase = true) ||
                     item.errorMessage.orEmpty().contains(normalizedSearch, ignoreCase = true)

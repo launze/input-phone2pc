@@ -37,8 +37,13 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.Cloud
 import androidx.compose.material.icons.filled.Computer
+import androidx.compose.material.icons.filled.CreateNewFolder
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Link
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.QrCodeScanner
 import androidx.compose.material.icons.filled.Refresh
@@ -50,10 +55,15 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Divider
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ExposedDropdownMenuBox
+import androidx.compose.material3.ExposedDropdownMenuDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
@@ -107,9 +117,14 @@ fun InputScreen(
     val historyLoadingMore by viewModel.historyLoadingMore.collectAsState()
     val historyInitialLoaded by viewModel.historyInitialLoaded.collectAsState()
     val inputText by viewModel.inputText.collectAsState()
+    val historyCategories by viewModel.historyCategories.collectAsState()
+    val selectedHistoryCategory by viewModel.selectedHistoryCategory.collectAsState()
     val serverDevices by viewModel.serverDevices.collectAsState()
     val pairedDevices by viewModel.pairedDevices.collectAsState()
     var showDeviceDialog by remember { mutableStateOf(false) }
+    var showAddCategoryDialog by remember { mutableStateOf(false) }
+    var showRenameCategoryDialog by remember { mutableStateOf(false) }
+    var showDeleteCategoryDialog by remember { mutableStateOf(false) }
     val context = LocalContext.current
     val snackbarHostState = remember { SnackbarHostState() }
     val coroutineScope = rememberCoroutineScope()
@@ -456,45 +471,108 @@ fun InputScreen(
                     .fillMaxWidth()
                     .imePadding()
             ) {
-                InputField(
-                    text = inputText,
-                    onTextChange = { viewModel.onInputTextChange(it) },
-                    onSend = { viewModel.sendText() },
-                    onSendWithEnter = { viewModel.sendText(pressEnter = true) },
-                    onPickImage = {
-                        imagePickerLauncher.launch(
-                            PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
-                        )
-                    },
-                    onPickFile = {
-                        filePickerLauncher.launch(arrayOf("*/*"))
-                    },
-                    onScanFile = onNavigateToFileScanner,
-                    onTakePhoto = {
-                        if (
-                            ContextCompat.checkSelfPermission(
-                                context,
-                                Manifest.permission.CAMERA
-                            ) == PackageManager.PERMISSION_GRANTED
-                        ) {
-                            launchCameraCapture()
-                        } else {
-                            cameraPermissionLauncher.launch(Manifest.permission.CAMERA)
-                        }
-                    },
-                    onPasteEmpty = {
-                        coroutineScope.launch {
-                            snackbarHostState.showSnackbar("剪贴板没有可粘贴的文本")
-                        }
-                    },
-                    enabled = sendAvailable,
-                    inputEnabled = true,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(16.dp)
-                )
+                Column(modifier = Modifier.fillMaxWidth()) {
+                    CategoryControlBar(
+                        categories = historyCategories,
+                        selectedCategory = selectedHistoryCategory,
+                        onCategorySelected = viewModel::selectHistoryCategory,
+                        onAddCategory = { showAddCategoryDialog = true },
+                        onRenameCategory = { showRenameCategoryDialog = true },
+                        onDeleteCategory = { showDeleteCategoryDialog = true },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp)
+                            .padding(top = 12.dp)
+                    )
+                    InputField(
+                        text = inputText,
+                        onTextChange = { viewModel.onInputTextChange(it) },
+                        onSend = { viewModel.sendText() },
+                        onSendWithEnter = { viewModel.sendText(pressEnter = true) },
+                        onPickImage = {
+                            imagePickerLauncher.launch(
+                                PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
+                            )
+                        },
+                        onPickFile = {
+                            filePickerLauncher.launch(arrayOf("*/*"))
+                        },
+                        onScanFile = onNavigateToFileScanner,
+                        onTakePhoto = {
+                            if (
+                                ContextCompat.checkSelfPermission(
+                                    context,
+                                    Manifest.permission.CAMERA
+                                ) == PackageManager.PERMISSION_GRANTED
+                            ) {
+                                launchCameraCapture()
+                            } else {
+                                cameraPermissionLauncher.launch(Manifest.permission.CAMERA)
+                            }
+                        },
+                        onPasteEmpty = {
+                            coroutineScope.launch {
+                                snackbarHostState.showSnackbar("剪贴板没有可粘贴的文本")
+                            }
+                        },
+                        enabled = sendAvailable,
+                        inputEnabled = true,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(16.dp)
+                    )
+                }
             }
         }
+    }
+
+    if (showAddCategoryDialog) {
+        CategoryEditDialog(
+            title = "新建目录",
+            initialName = "",
+            confirmLabel = "新建",
+            onConfirm = { name ->
+                viewModel.addHistoryCategory(name)
+                showAddCategoryDialog = false
+            },
+            onDismiss = { showAddCategoryDialog = false }
+        )
+    }
+
+    if (showRenameCategoryDialog) {
+        CategoryEditDialog(
+            title = "修改目录",
+            initialName = selectedHistoryCategory,
+            confirmLabel = "保存",
+            onConfirm = { name ->
+                viewModel.renameHistoryCategory(selectedHistoryCategory, name)
+                showRenameCategoryDialog = false
+            },
+            onDismiss = { showRenameCategoryDialog = false }
+        )
+    }
+
+    if (showDeleteCategoryDialog) {
+        AlertDialog(
+            onDismissRequest = { showDeleteCategoryDialog = false },
+            title = { Text("删除目录") },
+            text = { Text("确定删除“$selectedHistoryCategory”吗？该目录下的历史记录会移到“语音输入”。") },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        viewModel.deleteHistoryCategory(selectedHistoryCategory)
+                        showDeleteCategoryDialog = false
+                    }
+                ) {
+                    Text("删除", color = MaterialTheme.colorScheme.error)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDeleteCategoryDialog = false }) {
+                    Text("取消")
+                }
+            }
+        )
     }
 
     if (showDeviceDialog) {
@@ -520,6 +598,143 @@ fun InputScreen(
         )
     }
 
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun CategoryControlBar(
+    categories: List<String>,
+    selectedCategory: String,
+    onCategorySelected: (String) -> Unit,
+    onAddCategory: () -> Unit,
+    onRenameCategory: () -> Unit,
+    onDeleteCategory: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    var expanded by remember { mutableStateOf(false) }
+    var actionMenuExpanded by remember { mutableStateOf(false) }
+    val canEditSelected = selectedCategory != "语音输入"
+
+    Row(
+        modifier = modifier,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        ExposedDropdownMenuBox(
+            expanded = expanded,
+            onExpandedChange = { expanded = !expanded },
+            modifier = Modifier.weight(1f)
+        ) {
+            OutlinedTextField(
+                value = selectedCategory,
+                onValueChange = {},
+                readOnly = true,
+                label = { Text("目录") },
+                leadingIcon = { Icon(Icons.Default.Folder, contentDescription = null) },
+                trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
+                modifier = Modifier
+                    .menuAnchor()
+                    .fillMaxWidth(),
+                singleLine = true
+            )
+            ExposedDropdownMenu(
+                expanded = expanded,
+                onDismissRequest = { expanded = false }
+            ) {
+                categories.forEach { category ->
+                    DropdownMenuItem(
+                        text = { Text(category) },
+                        onClick = {
+                            onCategorySelected(category)
+                            expanded = false
+                        }
+                    )
+                }
+            }
+        }
+        IconButton(
+            onClick = { actionMenuExpanded = true },
+            modifier = Modifier.size(40.dp)
+        ) {
+            Icon(Icons.Default.MoreVert, contentDescription = "目录操作")
+            DropdownMenu(
+                expanded = actionMenuExpanded,
+                onDismissRequest = { actionMenuExpanded = false }
+            ) {
+                DropdownMenuItem(
+                    text = { Text("新建目录") },
+                    leadingIcon = { Icon(Icons.Default.CreateNewFolder, contentDescription = null) },
+                    onClick = {
+                        actionMenuExpanded = false
+                        onAddCategory()
+                    }
+                )
+                DropdownMenuItem(
+                    text = { Text("修改目录") },
+                    leadingIcon = { Icon(Icons.Default.Edit, contentDescription = null) },
+                    enabled = canEditSelected,
+                    onClick = {
+                        actionMenuExpanded = false
+                        onRenameCategory()
+                    }
+                )
+                DropdownMenuItem(
+                    text = { Text("删除目录") },
+                    leadingIcon = {
+                        Icon(
+                            Icons.Default.Delete,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.error
+                        )
+                    },
+                    enabled = canEditSelected,
+                    onClick = {
+                        actionMenuExpanded = false
+                        onDeleteCategory()
+                    }
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun CategoryEditDialog(
+    title: String,
+    initialName: String,
+    confirmLabel: String,
+    onConfirm: (String) -> Unit,
+    onDismiss: () -> Unit
+) {
+    var name by remember(initialName) { mutableStateOf(initialName) }
+    val normalized = name.trim()
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(title) },
+        text = {
+            OutlinedTextField(
+                value = name,
+                onValueChange = { name = it },
+                label = { Text("目录名称") },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth()
+            )
+        },
+        confirmButton = {
+            TextButton(
+                onClick = { onConfirm(normalized) },
+                enabled = normalized.isNotBlank() && normalized != "语音输入"
+            ) {
+                Text(confirmLabel)
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("取消")
+            }
+        }
+    )
 }
 
 private fun createCameraOutputUri(context: Context): Uri {

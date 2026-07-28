@@ -46,6 +46,12 @@ public:
 		return _progress;
 	}
 
+	std::vector<size_t> get_sizes() const
+	{
+		std::lock_guard<std::mutex> lock(_readMutex);
+		return _sizes;
+	}
+
 	void update_status()
 	{
 		// we call this under the writeMutex+readMutex. The `const`s are only under readMutex.
@@ -53,6 +59,7 @@ public:
 		std::lock_guard<std::mutex> lock(_readMutex);
 		_done = _decoder.get_done();
 		_progress = _decoder.get_progress();
+		_sizes = _decoder.get_sizes();
 	}
 
 	void process()
@@ -91,4 +98,5 @@ protected:
 
 	std::vector<std::string> _done;
 	std::vector<double> _progress;
+	std::vector<size_t> _sizes;
 };

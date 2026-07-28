@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material3.AlertDialog
@@ -27,6 +28,7 @@ import androidx.compose.material3.Checkbox
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -141,7 +143,11 @@ fun HistoryItemView(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 StatusChip(item.syncStatus)
-                Spacer(modifier = Modifier.width(8.dp))
+                if (item.category.isNotBlank()) {
+                    Spacer(modifier = Modifier.width(6.dp))
+                    SmallInfoPill(item.category)
+                }
+                Spacer(modifier = Modifier.width(6.dp))
                 Text(
                     text = item.compactMetaText(),
                     style = MaterialTheme.typography.bodySmall,
@@ -153,13 +159,13 @@ fun HistoryItemView(
                 if (onDelete != null) {
                     IconButton(
                         onClick = { showDeleteDialog = true },
-                        modifier = Modifier.size(36.dp)
+                        modifier = Modifier.size(30.dp)
                     ) {
                         Icon(
                             Icons.Default.Delete,
                             contentDescription = "删除",
                             tint = MaterialTheme.colorScheme.error,
-                            modifier = Modifier.size(20.dp)
+                            modifier = Modifier.size(18.dp)
                         )
                     }
                 }
@@ -239,6 +245,23 @@ private fun CompactInfoChip(label: String) {
     )
 }
 
+@Composable
+private fun SmallInfoPill(label: String) {
+    Surface(
+        color = MaterialTheme.colorScheme.surfaceVariant,
+        contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+        shape = RoundedCornerShape(50)
+    ) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelSmall,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.padding(horizontal = 7.dp, vertical = 3.dp)
+        )
+    }
+}
+
 private fun HistoryItem.compactMetaText(): String {
     return listOfNotNull(
         targetDeviceName.takeIf { it.isNotBlank() },
@@ -256,15 +279,18 @@ private fun StatusChip(status: SyncStatus) {
         SyncStatus.DIRECT -> Triple("直连", Color(0xFFE8DEF8), Color(0xFF4F378B))
     }
 
-    AssistChip(
-        onClick = {},
-        enabled = false,
-        label = { Text(label) },
-        colors = AssistChipDefaults.assistChipColors(
-            disabledContainerColor = containerColor,
-            disabledLabelColor = contentColor
+    Surface(
+        color = containerColor,
+        contentColor = contentColor,
+        shape = RoundedCornerShape(50)
+    ) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelSmall,
+            maxLines = 1,
+            modifier = Modifier.padding(horizontal = 7.dp, vertical = 3.dp)
         )
-    )
+    }
 }
 
 private fun formatTimestamp(timestamp: Long): String {

@@ -125,6 +125,14 @@ public:
 		return progress;
 	}
 
+	std::vector<size_t> get_sizes() const
+	{
+		std::vector<size_t> sizes;
+		for (auto&& [slot, s] : _streams)
+			sizes.push_back(s.data_size());
+		return sizes;
+	}
+
 	bool is_done(uint32_t id) const
 	{
 		return _done.find(id) != _done.end();

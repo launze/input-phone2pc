@@ -6,6 +6,8 @@ use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
 
+pub const DEFAULT_CATEGORY: &str = "语音输入";
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HistoryRecord {
     pub id: String,
@@ -25,6 +27,8 @@ pub struct HistoryRecord {
     pub pinned: bool,
     #[serde(default)]
     pub tags: String,
+    #[serde(default = "default_category")]
+    pub category: String,
 }
 
 #[derive(Debug, Clone)]
@@ -39,6 +43,7 @@ pub struct NewHistoryRecord {
     pub via: String,
     pub delivery_mode: String,
     pub metadata: Option<String>,
+    pub category: Option<String>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -58,6 +63,7 @@ pub struct HistoryQuery {
     pub favorite: Option<bool>,
     pub pinned: Option<bool>,
     pub tag: Option<String>,
+    pub category: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -99,8 +105,9 @@ pub fn record_message(record: NewHistoryRecord) -> Result<(HistoryRecord, bool)>
             received_at,
             via,
             delivery_mode,
-            metadata
-         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+            metadata,
+            category
+         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
         params![
             record.id,
             record.from_device_id,
@@ -111,7 +118,8 @@ pub fn record_message(record: NewHistoryRecord) -> Result<(HistoryRecord, bool)>
             record.received_at,
             record.via,
             record.delivery_mode,
-            record.metadata
+            record.metadata,
+            normalize_category(record.category.as_deref())
         ],
     )?;
 
@@ -172,6 +180,7 @@ pub fn delete_records(query: HistoryQuery) -> Result<usize> {
         favorite: query.favorite,
         pinned: query.pinned,
         tag: query.tag,
+        category: query.category,
     })?;
     if records.is_empty() {
         return Ok(0);
@@ -274,6 +283,104 @@ pub fn set_record_tags(id: &str, tags: &str) -> Result<HistoryRecord> {
     get_record_by_id(&conn, id)?.ok_or_else(|| anyhow!("history record missing after tags update"))
 }
 
+pub fn list_categories() -> Result<Vec<String>> {
+    let conn = open_connection()?;
+    let mut categories = vec![DEFAULT_CATEGORY.to_string()];
+
+    {
+        let mut stmt = conn.prepare(
+            "SELECT name
+             FROM history_categories
+             WHERE name IS NOT NULL AND TRIM(name) <> ''",
+        )?;
+        let rows = stmt.query_map([], |row| row.get::<_, String>(0))?;
+        for row in rows {
+            let category = normalize_category(Some(&row?));
+            if category != DEFAULT_CATEGORY && !categories.contains(&category) {
+                categories.push(category);
+            }
+        }
+    }
+
+    {
+        let mut stmt = conn.prepare(
+            "SELECT DISTINCT category
+             FROM message_history
+             WHERE category IS NOT NULL AND TRIM(category) <> ''",
+        )?;
+        let rows = stmt.query_map([], |row| row.get::<_, String>(0))?;
+        for row in rows {
+            let category = normalize_category(Some(&row?));
+            if category != DEFAULT_CATEGORY && !categories.contains(&category) {
+                categories.push(category);
+            }
+        }
+    }
+
+    categories.sort_by(|a, b| {
+        if a == DEFAULT_CATEGORY {
+            std::cmp::Ordering::Less
+        } else if b == DEFAULT_CATEGORY {
+            std::cmp::Ordering::Greater
+        } else {
+            a.cmp(b)
+        }
+    });
+    Ok(categories)
+}
+
+pub fn add_category(category: &str) -> Result<Vec<String>> {
+    let normalized = normalize_category(Some(category));
+    if normalized == DEFAULT_CATEGORY {
+        return list_categories();
+    }
+    let conn = open_connection()?;
+    conn.execute(
+        "INSERT OR IGNORE INTO history_categories (name) VALUES (?1)",
+        params![normalized],
+    )?;
+    list_categories()
+}
+
+pub fn rename_category(old_name: &str, new_name: &str) -> Result<Vec<String>> {
+    let old_category = normalize_category(Some(old_name));
+    let new_category = normalize_category(Some(new_name));
+    if old_category == DEFAULT_CATEGORY || new_category == DEFAULT_CATEGORY {
+        return list_categories();
+    }
+    let conn = open_connection()?;
+    conn.execute(
+        "INSERT OR IGNORE INTO history_categories (name) VALUES (?1)",
+        params![new_category],
+    )?;
+    conn.execute(
+        "DELETE FROM history_categories WHERE name = ?1",
+        params![old_category],
+    )?;
+    conn.execute(
+        "UPDATE message_history SET category = ?2 WHERE category = ?1",
+        params![old_category, new_category],
+    )?;
+    list_categories()
+}
+
+pub fn delete_category(category: &str) -> Result<Vec<String>> {
+    let normalized = normalize_category(Some(category));
+    if normalized == DEFAULT_CATEGORY {
+        return list_categories();
+    }
+    let conn = open_connection()?;
+    conn.execute(
+        "DELETE FROM history_categories WHERE name = ?1",
+        params![normalized],
+    )?;
+    conn.execute(
+        "UPDATE message_history SET category = ?2 WHERE category = ?1",
+        params![normalized, DEFAULT_CATEGORY],
+    )?;
+    list_categories()
+}
+
 pub fn delete_record(id: &str) -> Result<()> {
     let conn = open_connection()?;
     let deleted = conn.execute("DELETE FROM message_history WHERE id = ?1", [id])?;
@@ -345,6 +452,7 @@ fn export_records(query: HistoryQuery) -> Result<Vec<HistoryRecord>> {
         favorite: query.favorite,
         pinned: query.pinned,
         tag: query.tag,
+        category: query.category,
     })
 }
 
@@ -370,6 +478,9 @@ fn format_records_text(title: &str, records: &[HistoryRecord]) -> String {
         }
         if !record.tags.trim().is_empty() {
             text.push_str(&format!("标签: {}\n", record.tags.trim()));
+        }
+        if !record.category.trim().is_empty() {
+            text.push_str(&format!("目录: {}\n", record.category.trim()));
         }
         text.push_str(record.content.trim());
         text.push_str("\n\n");
@@ -413,6 +524,9 @@ fn format_records_markdown(title: &str, records: &[HistoryRecord]) -> String {
         if !record.tags.trim().is_empty() {
             markdown.push_str(&format!("- 标签: {}\n", escape_markdown_inline(record.tags.trim())));
         }
+        if !record.category.trim().is_empty() {
+            markdown.push_str(&format!("- 目录: {}\n", escape_markdown_inline(record.category.trim())));
+        }
         markdown.push_str("\n");
         markdown.push_str(&escape_markdown_content(record.content.trim()));
         markdown.push_str("\n\n");
@@ -422,13 +536,13 @@ fn format_records_markdown(title: &str, records: &[HistoryRecord]) -> String {
 
 fn format_records_csv(records: &[HistoryRecord]) -> String {
     let mut csv = String::from(
-        "id,from_device_id,from_device_name,content_type,content,sent_at_iso,received_at_iso,via,delivery_mode,source_app,source_package,favorite,pinned,tags,metadata\n",
+        "id,from_device_id,from_device_name,content_type,content,sent_at_iso,received_at_iso,via,delivery_mode,source_app,source_package,favorite,pinned,tags,category,metadata\n",
     );
 
     for record in records {
         let (source_app, source_package) = source_app_fields(record);
         csv.push_str(&format!(
-            "{},{},{},{},{},{},{},{},{},{},{},{},{},{},{}\n",
+            "{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{}\n",
             escape_csv(&record.id),
             escape_csv(&record.from_device_id),
             escape_csv(&record.from_device_name),
@@ -443,6 +557,7 @@ fn format_records_csv(records: &[HistoryRecord]) -> String {
             escape_csv(if record.favorite { "1" } else { "0" }),
             escape_csv(if record.pinned { "1" } else { "0" }),
             escape_csv(&record.tags),
+            escape_csv(&record.category),
             escape_csv(record.metadata.as_deref().unwrap_or_default()),
         ));
     }
@@ -577,6 +692,7 @@ pub fn list_notification_apps() -> Result<Vec<NotificationAppSummary>> {
         favorite: None,
         pinned: None,
         tag: None,
+        category: None,
     })?;
 
     let mut apps = std::collections::BTreeMap::<String, NotificationAppSummary>::new();
@@ -634,7 +750,8 @@ fn get_record_by_id(conn: &Connection, id: &str) -> Result<Option<HistoryRecord>
             metadata,
             favorite,
             pinned,
-            tags
+            tags,
+            category
          FROM message_history
          WHERE id = ?1",
     )?;
@@ -662,6 +779,7 @@ fn map_record_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<HistoryRecord> {
         favorite: row.get::<_, i64>(10).unwrap_or(0) != 0,
         pinned: row.get::<_, i64>(11).unwrap_or(0) != 0,
         tags: row.get::<_, String>(12).unwrap_or_default(),
+        category: normalize_category(row.get::<_, Option<String>>(13)?.as_deref()),
     })
 }
 
@@ -691,7 +809,12 @@ fn open_connection() -> Result<Connection> {
             metadata TEXT,
             favorite INTEGER NOT NULL DEFAULT 0,
             pinned INTEGER NOT NULL DEFAULT 0,
-            tags TEXT NOT NULL DEFAULT ''
+            tags TEXT NOT NULL DEFAULT '',
+            category TEXT NOT NULL DEFAULT '语音输入'
+        );
+
+        CREATE TABLE IF NOT EXISTS history_categories (
+            name TEXT PRIMARY KEY
         );
 
         CREATE INDEX IF NOT EXISTS idx_message_history_received_at
@@ -701,6 +824,11 @@ fn open_connection() -> Result<Connection> {
     ensure_favorite_column(&conn)?;
     ensure_pinned_column(&conn)?;
     ensure_tags_column(&conn)?;
+    ensure_category_column(&conn)?;
+    conn.execute(
+        "INSERT OR IGNORE INTO history_categories (name) VALUES (?1)",
+        params![DEFAULT_CATEGORY],
+    )?;
 
     Ok(conn)
 }
@@ -770,6 +898,23 @@ fn ensure_tags_column(conn: &Connection) -> Result<()> {
     Ok(())
 }
 
+fn ensure_category_column(conn: &Connection) -> Result<()> {
+    let mut stmt = conn.prepare("PRAGMA table_info(message_history)")?;
+    let columns = stmt.query_map([], |row| row.get::<_, String>(1))?;
+
+    for column in columns {
+        if column? == "category" {
+            return Ok(());
+        }
+    }
+
+    conn.execute(
+        "ALTER TABLE message_history ADD COLUMN category TEXT NOT NULL DEFAULT '语音输入'",
+        [],
+    )?;
+    Ok(())
+}
+
 fn get_history_db_path() -> PathBuf {
     let base_dir = dirs::data_local_dir()
         .or_else(dirs::data_dir)
@@ -801,6 +946,18 @@ fn normalize_tags(value: &str) -> String {
     tags.sort();
     tags.dedup();
     tags.join(",")
+}
+
+fn normalize_category(value: Option<&str>) -> String {
+    value
+        .map(str::trim)
+        .filter(|category| !category.is_empty())
+        .unwrap_or(DEFAULT_CATEGORY)
+        .to_string()
+}
+
+fn default_category() -> String {
+    DEFAULT_CATEGORY.to_string()
 }
 
 fn split_filter_values(value: &str) -> Vec<String> {
@@ -877,7 +1034,8 @@ fn build_list_query(query: &HistoryQuery) -> (String, Vec<SqlValue>) {
             metadata,
             favorite,
             pinned,
-            tags
+            tags,
+            category
          FROM message_history
          WHERE 1 = 1",
     );
@@ -995,6 +1153,16 @@ fn build_list_query(query: &HistoryQuery) -> (String, Vec<SqlValue>) {
         params.push(SqlValue::Text(pattern));
     }
 
+    if let Some(category) = query
+        .category
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty() && *value != "all")
+    {
+        sql.push_str(" AND category = ?");
+        params.push(SqlValue::Text(category.to_string()));
+    }
+
     if let Some(search) = query
         .search
         .as_deref()
@@ -1011,10 +1179,11 @@ fn build_list_query(query: &HistoryQuery) -> (String, Vec<SqlValue>) {
                 OR delivery_mode LIKE ?
                 OR content_type LIKE ?
                 OR tags LIKE ?
+                OR category LIKE ?
                 OR metadata LIKE ?
             )",
         );
-        for _ in 0..8 {
+        for _ in 0..9 {
             params.push(SqlValue::Text(pattern.clone()));
         }
     }
@@ -1056,6 +1225,7 @@ mod tests {
             favorite: false,
             pinned: false,
             tags: String::new(),
+            category: DEFAULT_CATEGORY.to_string(),
         }
     }
 
@@ -1146,8 +1316,8 @@ mod tests {
         let csv = format_records_csv(&[notification]);
 
         assert!(csv.starts_with("id,from_device_id,from_device_name,content_type,content"));
-        assert!(csv.contains("source_app,source_package,favorite,pinned,tags,metadata"));
-        assert!(csv.contains("\"微信\",\"com.tencent.mm\",\"1\",\"1\",\"工作,待办\""));
+        assert!(csv.contains("source_app,source_package,favorite,pinned,tags,category,metadata"));
+        assert!(csv.contains("\"微信\",\"com.tencent.mm\",\"1\",\"1\",\"工作,待办\",\"语音输入\""));
         assert!(csv.contains("\"\"app_name\"\""));
         assert!(csv.contains("\"\"微信\"\""));
         assert!(csv.contains("\"\"importance\"\":4"));
@@ -1288,6 +1458,7 @@ mod tests {
             favorite: Some(true),
             pinned: Some(false),
             tag: Some("工作".to_string()),
+            category: Some("会议".to_string()),
         };
 
         let (sql, params) = build_list_query(&query);
@@ -1303,6 +1474,7 @@ mod tests {
         assert!(sql.contains("favorite = ?"));
         assert!(sql.contains("pinned = ?"));
         assert!(sql.contains("tags LIKE ?"));
+        assert!(sql.contains("category = ?"));
         assert!(sql.contains("metadata LIKE ?"));
         assert!(sql.contains("(received_at < ? OR (received_at = ? AND id < ?))"));
         assert!(sql.ends_with("ORDER BY pinned DESC, favorite DESC, received_at DESC, id DESC LIMIT ?"));
@@ -1325,6 +1497,8 @@ mod tests {
                 SqlValue::Integer(1),
                 SqlValue::Integer(0),
                 SqlValue::Text("%工作%".to_string()),
+                SqlValue::Text("会议".to_string()),
+                SqlValue::Text("%项目%".to_string()),
                 SqlValue::Text("%项目%".to_string()),
                 SqlValue::Text("%项目%".to_string()),
                 SqlValue::Text("%项目%".to_string()),
@@ -1359,6 +1533,7 @@ mod tests {
             favorite: None,
             pinned: None,
             tag: None,
+            category: None,
         };
 
         let (sql, params) = build_list_query(&query);
@@ -1385,6 +1560,7 @@ mod tests {
             favorite: None,
             pinned: None,
             tag: Some("all".to_string()),
+            category: Some("all".to_string()),
         };
 
         let (sql, params) = build_list_query(&query);
@@ -1395,6 +1571,7 @@ mod tests {
         assert!(!sql.contains("metadata LIKE ?"));
         assert!(!sql.contains("delivery_mode = ?"));
         assert!(!sql.contains("tags LIKE ?"));
+        assert!(!sql.contains("category = ?"));
         assert!(params.is_empty());
     }
 }

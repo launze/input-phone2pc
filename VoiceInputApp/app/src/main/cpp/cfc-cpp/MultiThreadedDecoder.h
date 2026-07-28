@@ -56,6 +56,7 @@ public:
 	unsigned files_decoded() const;
 	std::vector<std::string> get_done() const;
 	std::vector<double> get_progress() const;
+	std::vector<size_t> get_sizes() const;
 
 protected:
 	int do_extract(const cv::Mat& mat, cv::Mat& img);
@@ -337,4 +338,9 @@ inline std::vector<std::string> MultiThreadedDecoder::get_done() const
 inline std::vector<double> MultiThreadedDecoder::get_progress() const
 {
 	return _writer.get_progress();
+}
+
+inline std::vector<size_t> MultiThreadedDecoder::get_sizes() const
+{
+	return _writer.get_sizes();
 }

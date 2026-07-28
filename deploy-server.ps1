@@ -4,7 +4,7 @@ param(
     [string]$User = "root",
     [string]$KeyPath = ".deploy/voiceinput_deploy_key",
     [string]$RemoteAppDir = "/opt/voiceinput/server",
-    [string]$Version = "1.2.8",
+    [string]$Version = "1.2.21",
     [string]$ArtifactDir = "release-artifacts/latest"
 )
 
@@ -69,10 +69,10 @@ $desktopSetupTarget = Join-Path $versionDir "voiceinput-desktop-windows-x64-v${V
 $androidTarget = Join-Path $versionDir "voiceinput-android-v${Version}.apk"
 
 $desktopMsiSource = Resolve-ArtifactOrBuildOutput "voiceinput-desktop-windows-x64-v${Version}.msi" @(
-    "voice-input-desktop/src-tauri/target/release/bundle/msi/语传-手机转电脑输入助手_${Version}_x64_zh-CN.msi"
+    "voice-input-desktop/src-tauri/target/release/bundle/msi/VoiceInput_${Version}_x64_zh-CN.msi"
 )
 $desktopSetupSource = Resolve-ArtifactOrBuildOutput "voiceinput-desktop-windows-x64-v${Version}-setup.exe" @(
-    "voice-input-desktop/src-tauri/target/release/bundle/nsis/语传-手机转电脑输入助手_${Version}_x64-setup.exe"
+    "voice-input-desktop/src-tauri/target/release/bundle/nsis/VoiceInput_${Version}_x64-setup.exe"
 )
 $androidSource = Resolve-ArtifactOrBuildOutput "voiceinput-android-v${Version}.apk" @(
     "VoiceInputApp/app/build/outputs/apk/release/app-release.apk",
@@ -87,17 +87,51 @@ $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
 $manifest.latest_version = $Version
 $release = @($manifest.releases | Where-Object { $_.version -eq $Version } | Select-Object -First 1)[0]
 if ($null -eq $release) {
-    throw "Release $Version not found in $manifestPath"
+    $release = [pscustomobject]@{
+        version = $Version
+        release_notes = ""
+        published_at = ""
+        force_update = $false
+        assets = @(
+            [pscustomobject]@{
+                platform = "android"
+                arch = "universal"
+                file_name = "voiceinput-android-v${Version}.apk"
+                sha256 = ""
+                size = 0
+                mime_type = "application/vnd.android.package-archive"
+            },
+            [pscustomobject]@{
+                platform = "windows"
+                arch = "x64"
+                file_name = "voiceinput-desktop-windows-x64-v${Version}-setup.exe"
+                sha256 = ""
+                size = 0
+                mime_type = "application/vnd.microsoft.portable-executable"
+            },
+            [pscustomobject]@{
+                platform = "windows"
+                arch = "x64"
+                file_name = "voiceinput-desktop-windows-x64-v${Version}.msi"
+                sha256 = ""
+                size = 0
+                mime_type = "application/x-msi"
+            }
+        )
+    }
+    $manifest.releases = @($release) + @($manifest.releases)
 }
 
 $release.published_at = (Get-Date).ToString("yyyy-MM-ddTHH:mm:sszzz")
-$release.release_notes = "PC 端 AI 助手右侧增加工具调用、引用记录、导出文件 Tab；会话列表精简为名称和时间并加宽；移除底部历史加载区域。"
+$release.release_notes = "修复 PC AI 助手按日期生成报告时，模型返回 YYYY-MM-DD 导致工具规划参数类型错误的问题；日期区间会按本地时区自动转换为完整的起止时间。"
 
 foreach ($asset in $release.assets) {
-    switch ($asset.file_name) {
-        "voiceinput-android-v${Version}.apk" { Update-Asset $asset $androidTarget }
-        "voiceinput-desktop-windows-x64-v${Version}-setup.exe" { Update-Asset $asset $desktopSetupTarget }
-        "voiceinput-desktop-windows-x64-v${Version}.msi" { Update-Asset $asset $desktopMsiTarget }
+    if ($asset.file_name -eq "voiceinput-android-v${Version}.apk") {
+        Update-Asset $asset $androidTarget
+    } elseif ($asset.file_name -eq "voiceinput-desktop-windows-x64-v${Version}-setup.exe") {
+        Update-Asset $asset $desktopSetupTarget
+    } elseif ($asset.file_name -eq "voiceinput-desktop-windows-x64-v${Version}.msi") {
+        Update-Asset $asset $desktopMsiTarget
     }
 }
 
@@ -106,18 +140,18 @@ $manifest | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath $manifestPath -E
 Invoke-Remote "mkdir -p '$RemoteAppDir/updates'"
 Copy-ToRemote (Resolve-RepoPath "voice-input-server/updates/.") "$RemoteAppDir/updates/"
 
-$restartCommand = @"
-if systemctl list-unit-files | grep -q '^voice-input-server\.service'; then
-  systemctl restart voice-input-server
-elif systemctl list-unit-files | grep -q '^voiceinput-server\.service'; then
-  systemctl restart voiceinput-server
-elif pgrep -f voice-input-server >/dev/null; then
-  pkill -f voice-input-server || true
-  cd '$RemoteAppDir' && nohup ./voice-input-server >/var/log/voice-input-server.log 2>&1 &
-else
-  true
-fi
-"@
+$restartCommand = @(
+    "if systemctl list-unit-files | grep -q '^voice-input-server\.service'; then",
+    "  systemctl restart voice-input-server",
+    "elif systemctl list-unit-files | grep -q '^voiceinput-server\.service'; then",
+    "  systemctl restart voiceinput-server",
+    "elif pgrep -f voice-input-server >/dev/null; then",
+    "  pkill -f voice-input-server || true",
+    "  cd '$RemoteAppDir' && nohup ./voice-input-server >/var/log/voice-input-server.log 2>&1 &",
+    "else",
+    "  true",
+    "fi"
+) -join "`n"
 
 Invoke-Remote $restartCommand
 Invoke-Remote "ls -lh '$RemoteAppDir/updates/stable/$Version' && test -f '$RemoteAppDir/updates/stable/manifest.json'"

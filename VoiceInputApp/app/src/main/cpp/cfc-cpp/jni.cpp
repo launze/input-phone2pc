@@ -279,7 +279,6 @@ Java_com_voiceinput_cimbar_FileTransferScanActivity_processImageJNI(JNIEnv *env,
 		_frameSuccessSnapshot = perfectSnapshot;
 	}
 
-	drawGuidance(mat, _transferStatus);
 	//drawDebugInfo(mat, *proc);
 
 	// log computation time to Android Logcat
@@ -365,6 +364,7 @@ Java_com_voiceinput_cimbar_FileTransferScanActivity_getStatsJNI(JNIEnv *env, job
 	unsigned scanOk = percent(MultiThreadedDecoder::decoded, locateFrames);
 	unsigned decodeOk = percent(MultiThreadedDecoder::perfect, MultiThreadedDecoder::decoded);
 	unsigned progressPct = 0;
+	size_t payloadTotalBytes = 0;
 	if (proc)
 	{
 		std::vector<double> progress = proc->get_progress();
@@ -372,12 +372,18 @@ Java_com_voiceinput_cimbar_FileTransferScanActivity_getStatsJNI(JNIEnv *env, job
 		for (double p : progress)
 			maxProgress = std::max(maxProgress, p);
 		progressPct = std::min<unsigned>(100, maxProgress * 100);
+
+		std::vector<size_t> sizes = proc->get_sizes();
+		for (size_t size : sizes)
+			payloadTotalBytes = std::max(payloadTotalBytes, size);
 	}
 
 	std::stringstream ss;
 	ss.setf(std::ios::fixed);
 	ss.precision(2);
 	ss << "Progress: " << progressPct << "%\n";
+	ss << "Payload bytes: " << payloadBytes << "\n";
+	ss << "Payload total bytes: " << payloadTotalBytes << "\n";
 	ss << "Camera FPS: " << cameraFps << "\n";
 	ss << "Payload speed: " << windowSpeedKb << " KB/s 5s, " << activeSpeedKb << " active avg\n";
 	ss << "Frames: " << _calls

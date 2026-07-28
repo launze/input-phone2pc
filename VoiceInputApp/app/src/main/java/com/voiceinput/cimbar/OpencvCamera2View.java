@@ -25,10 +25,8 @@ import android.util.Log;
 import android.util.Range;
 import android.view.Surface;
 import android.view.ViewGroup.LayoutParams;
-import android.view.WindowManager;
 
 import org.opencv.android.CameraBridgeViewBase;
-import org.opencv.core.Core;
 import org.opencv.core.CvType;
 import org.opencv.core.Mat;
 import org.opencv.core.Size;
@@ -60,7 +58,6 @@ public class OpencvCamera2View extends CameraBridgeViewBase {
     private CaptureRequest.Builder mPreviewRequestBuilder;
     private String mCameraID;
     private android.util.Size mPreviewSize = new android.util.Size(-1, -1);
-    private int mFrameRotation = 0;
 
     private HandlerThread mBackgroundThread;
     private Handler mBackgroundHandler;
@@ -388,10 +385,8 @@ public class OpencvCamera2View extends CameraBridgeViewBase {
         initializeCamera();
         try {
             boolean needReconfig = calcPreviewSize(width, height);
-            mFrameRotation = getFrameRotation(width, height, mPreviewSize.getWidth(), mPreviewSize.getHeight());
-            boolean swapsDimensions = mFrameRotation == 90 || mFrameRotation == 270;
-            mFrameWidth = swapsDimensions ? mPreviewSize.getHeight() : mPreviewSize.getWidth();
-            mFrameHeight = swapsDimensions ? mPreviewSize.getWidth() : mPreviewSize.getHeight();
+            mFrameWidth = mPreviewSize.getWidth();
+            mFrameHeight = mPreviewSize.getHeight();
 
             if ((getLayoutParams().width == LayoutParams.MATCH_PARENT) && (getLayoutParams().height == LayoutParams.MATCH_PARENT))
                 mScale = Math.min(((float)height)/mFrameHeight, ((float)width)/mFrameWidth);
@@ -455,7 +450,7 @@ public class OpencvCamera2View extends CameraBridgeViewBase {
                     assert(addr_diff == -1);
                     Imgproc.cvtColorTwoPlane(y_mat, uv_mat2, mRgba, Imgproc.COLOR_YUV2RGBA_NV21);
                 }
-                return rotateRgbaIfNeeded();
+                return mRgba;
             } else { // Chroma channels are not interleaved
                 byte[] yuv_bytes = new byte[w*(h+h/2)];
                 ByteBuffer y_plane = planes[0].getBuffer();
@@ -510,86 +505,24 @@ public class OpencvCamera2View extends CameraBridgeViewBase {
                 Mat yuv_mat = new Mat(h+h/2, w, CvType.CV_8UC1);
                 yuv_mat.put(0, 0, yuv_bytes);
                 Imgproc.cvtColor(yuv_mat, mRgba, Imgproc.COLOR_YUV2RGBA_I420, 4);
-                return rotateRgbaIfNeeded();
+                return mRgba;
             }
         }
-
-        private Mat rotateRgbaIfNeeded() {
-            if (mFrameRotation == 90) {
-                Core.rotate(mRgba, mRotatedRgba, Core.ROTATE_90_CLOCKWISE);
-                return mRotatedRgba;
-            } else if (mFrameRotation == 180) {
-                Core.rotate(mRgba, mRotatedRgba, Core.ROTATE_180);
-                return mRotatedRgba;
-            } else if (mFrameRotation == 270) {
-                Core.rotate(mRgba, mRotatedRgba, Core.ROTATE_90_COUNTERCLOCKWISE);
-                return mRotatedRgba;
-            }
-            return mRgba;
-        }
-
 
         public JavaCamera2Frame(Image image) {
             super();
             mImage = image;
             mRgba = new Mat();
             mGray = new Mat();
-            mRotatedRgba = new Mat();
         }
 
         public void release() {
             mRgba.release();
             mGray.release();
-            mRotatedRgba.release();
         }
 
         private Image mImage;
         private Mat mRgba;
         private Mat mGray;
-        private Mat mRotatedRgba;
     };
-
-    private int getFrameRotation(int surfaceWidth, int surfaceHeight, int previewWidth, int previewHeight) {
-        if (mCameraID == null) {
-            return surfaceHeight > surfaceWidth && previewWidth > previewHeight ? 90 : 0;
-        }
-
-        CameraManager manager = (CameraManager) getContext().getSystemService(Context.CAMERA_SERVICE);
-        try {
-            CameraCharacteristics characteristics = manager.getCameraCharacteristics(mCameraID);
-            Integer sensorOrientation = characteristics.get(CameraCharacteristics.SENSOR_ORIENTATION);
-            Integer lensFacing = characteristics.get(CameraCharacteristics.LENS_FACING);
-            if (sensorOrientation == null) {
-                return surfaceHeight > surfaceWidth && previewWidth > previewHeight ? 90 : 0;
-            }
-
-            int displayDegrees = 0;
-            WindowManager windowManager = (WindowManager) getContext().getSystemService(Context.WINDOW_SERVICE);
-            if (windowManager != null && windowManager.getDefaultDisplay() != null) {
-                switch (windowManager.getDefaultDisplay().getRotation()) {
-                    case Surface.ROTATION_90:
-                        displayDegrees = 90;
-                        break;
-                    case Surface.ROTATION_180:
-                        displayDegrees = 180;
-                        break;
-                    case Surface.ROTATION_270:
-                        displayDegrees = 270;
-                        break;
-                    case Surface.ROTATION_0:
-                    default:
-                        displayDegrees = 0;
-                        break;
-                }
-            }
-
-            if (lensFacing != null && lensFacing == CameraCharacteristics.LENS_FACING_FRONT) {
-                return (360 - ((sensorOrientation + displayDegrees) % 360)) % 360;
-            }
-            return (sensorOrientation - displayDegrees + 360) % 360;
-        } catch (Exception e) {
-            Log.e(LOGTAG, "Unable to read camera rotation: " + e.getLocalizedMessage());
-            return surfaceHeight > surfaceWidth && previewWidth > previewHeight ? 90 : 0;
-        }
-    }
 }

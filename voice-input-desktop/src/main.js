@@ -1,6 +1,14 @@
 ﻿// 寮曞叆 Tauri API
 const invoke = window.__TAURI_INTERNALS__.invoke;
 
+function debugC2Main(message) {
+    const text = `${new Date().toISOString()} ${message}`;
+    console.log('[c2-reader:main]', text);
+    try {
+        Promise.resolve(invoke('debug_c2_reader_log', { message: `[main] ${text}` })).catch(() => {});
+    } catch (_) {}
+}
+
 import {
     escapeHtml,
     formatDateTime,
@@ -53,13 +61,156 @@ import {
     renderAiToolCallItem
 } from './ai-assistant.js';
 
+function initializeC2ReaderWindow() {
+    document.body.className = 'c2-reader-window-body';
+    document.body.innerHTML = `
+        <main class="c2-mini-panel">
+            <header class="c2-mini-head">
+                <div>
+                    <div class="c2-mini-title">二维码读取</div>
+                    <div id="c2-mini-summary" class="c2-mini-summary">可点击开始截图读取</div>
+                </div>
+                <button id="c2-mini-close-btn" class="c2-mini-close" type="button" title="退出">×</button>
+            </header>
+            <section class="c2-mini-stats">
+                <div class="c2-mini-progress" id="c2-mini-progress-ring"><span id="c2-mini-progress">0%</span></div>
+                <div class="c2-mini-lines">
+                    <div><span>状态</span><strong id="c2-mini-state">待机</strong></div>
+                    <div><span>帧数</span><strong id="c2-mini-frames">0</strong></div>
+                    <div><span>完成</span><strong id="c2-mini-files">0</strong></div>
+                </div>
+            </section>
+            <section class="c2-mini-actions">
+                <button id="c2-mini-start-btn" class="btn-small btn-primary" type="button">开始截图</button>
+                <button id="c2-mini-stop-btn" class="btn-small" type="button">停止</button>
+            </section>
+            <div id="c2-mini-message" class="c2-mini-message"></div>
+        </main>
+    `;
+
+    const summaryEl = document.getElementById('c2-mini-summary');
+    const stateEl = document.getElementById('c2-mini-state');
+    const framesEl = document.getElementById('c2-mini-frames');
+    const filesEl = document.getElementById('c2-mini-files');
+    const progressEl = document.getElementById('c2-mini-progress');
+    const progressRing = document.getElementById('c2-mini-progress-ring');
+    const messageEl = document.getElementById('c2-mini-message');
+    const startBtn = document.getElementById('c2-mini-start-btn');
+    const stopBtn = document.getElementById('c2-mini-stop-btn');
+    const closeBtn = document.getElementById('c2-mini-close-btn');
+    let timer = null;
+    let lastStatus = null;
+
+    function setMessage(message = '', tone = '') {
+        messageEl.textContent = message;
+        messageEl.className = 'c2-mini-message';
+        if (tone) messageEl.classList.add(tone);
+    }
+
+    function renderStatus(status = {}) {
+        lastStatus = status;
+        const available = status.available !== false;
+        const running = Boolean(status.running);
+        const progress = Math.max(0, Math.min(100, Number(status.progress || 0)));
+        const filesDecoded = status.files_decoded || status.filesDecoded || 0;
+        const lastSaved = status.last_saved || status.lastSaved || '';
+
+        progressRing.style.setProperty('--progress', `${progress}%`);
+        progressEl.textContent = `${progress}%`;
+        stateEl.textContent = !available ? '不可用' : running ? '截图中' : '待机';
+        summaryEl.textContent = !available
+            ? '内置模块未就绪'
+            : running
+                ? '正在读取桌面 C2 动态二维码'
+                : '可点击开始截图读取';
+        framesEl.textContent = String(status.frames || 0);
+        filesEl.textContent = String(filesDecoded);
+        startBtn.disabled = !available || running;
+        stopBtn.disabled = !available || !running;
+
+        if (status.error) {
+            setMessage(status.error, 'error');
+        } else if (lastSaved) {
+            setMessage(`已保存：${lastSaved}`, 'success');
+        } else if (running) {
+            setMessage('保持二维码完整显示在屏幕上。');
+        } else if (available) {
+            setMessage('');
+        }
+    }
+
+    async function refreshStatus() {
+        try {
+            renderStatus(await invoke('get_c2_screen_reader_status'));
+        } catch (error) {
+            const message = typeof error === 'string' ? error : error?.message || '读取状态失败';
+            setMessage(message, 'error');
+        }
+    }
+
+    function startPolling() {
+        window.clearInterval(timer);
+        timer = window.setInterval(refreshStatus, 800);
+    }
+
+    startBtn.addEventListener('click', async () => {
+        startBtn.disabled = true;
+        setMessage('正在启动截图读取...');
+        try {
+            renderStatus(await invoke('start_c2_screen_reader'));
+        } catch (error) {
+            const message = typeof error === 'string' ? error : error?.message || '启动失败';
+            setMessage(message, 'error');
+            await refreshStatus();
+        }
+    });
+
+    stopBtn.addEventListener('click', async () => {
+        stopBtn.disabled = true;
+        try {
+            renderStatus(await invoke('stop_c2_screen_reader'));
+            setMessage('已停止截图读取。');
+        } catch (error) {
+            const message = typeof error === 'string' ? error : error?.message || '停止失败';
+            setMessage(message, 'error');
+            await refreshStatus();
+        }
+    });
+
+    closeBtn.addEventListener('click', async () => {
+        try {
+            if (lastStatus?.running) {
+                await invoke('stop_c2_screen_reader');
+            }
+        } finally {
+            window.close();
+        }
+    });
+
+    window.addEventListener('beforeunload', () => {
+        window.clearInterval(timer);
+    });
+
+    refreshStatus();
+    startPolling();
+}
+
 document.addEventListener('DOMContentLoaded', async () => {
     console.log('app loaded');
+    debugC2Main(`DOMContentLoaded url=${window.location.href}`);
+    const isC2ReaderWindow = new URLSearchParams(window.location.search).get('reader') === '1';
+    if (isC2ReaderWindow) {
+        debugC2Main('legacy reader query window detected');
+        initializeC2ReaderWindow();
+        return;
+    }
 
     // 鍏冪礌寮曠敤
     const serverModeToggle = document.getElementById('server-mode-toggle');
     const serverDot = document.getElementById('server-dot');
     const editUrlBtn = document.getElementById('edit-url-btn');
+    const openC2ReaderBtn = document.getElementById('open-c2-reader-btn');
+    debugC2Main(`open-c2-reader button found=${Boolean(openC2ReaderBtn)}`);
     const toolbarSettingsBtn = document.getElementById('toolbar-settings-btn');
     const toolbarSettingsMenu = document.getElementById('toolbar-settings-menu');
     const urlBar = document.getElementById('url-bar');
@@ -79,6 +230,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     const qrArea = document.getElementById('qr-area');
     const qrCodeImg = document.getElementById('qr-code-img');
     const refreshQrBtn = document.getElementById('refresh-qr-btn');
+    const qrPairingModeLabel = document.getElementById('qr-pairing-mode-label');
+    const toggleQrModeBtn = document.getElementById('toggle-qr-mode-btn');
     const historyList = document.getElementById('history-list');
     const historyEmpty = document.getElementById('history-empty');
     const historyPagination = document.getElementById('history-pagination');
@@ -104,6 +257,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     const historyStatusFilter = document.getElementById('history-status-filter');
     const historySourceAppFilter = document.getElementById('history-source-app-filter');
     const historyTagFilter = document.getElementById('history-tag-filter');
+    const historyCategoryFilter = document.getElementById('history-category-filter');
     const exportFilteredHistoryBtn = document.getElementById('export-filtered-history-btn');
     const exportFilteredHistoryTxtBtn = document.getElementById('export-filtered-history-txt-btn');
     const exportFilteredHistoryMdBtn = document.getElementById('export-filtered-history-md-btn');
@@ -144,6 +298,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     const createAiSessionBtn = document.getElementById('create-ai-session-btn');
     const stopAiSessionBtn = document.getElementById('stop-ai-session-btn');
     const newAiSessionBtn = document.getElementById('new-ai-session-btn');
+    const renameAiSessionBtn = document.getElementById('rename-ai-session-btn');
+    const deleteAiSessionBtn = document.getElementById('delete-ai-session-btn');
     const exportAiSessionWordBtn = document.getElementById('export-ai-session-word-btn');
     const aiReferenceList = document.getElementById('ai-reference-list');
     const aiExportedFileList = document.getElementById('ai-exported-file-list');
@@ -165,6 +321,9 @@ document.addEventListener('DOMContentLoaded', async () => {
     const confirmImportAiSkillsBtn = document.getElementById('confirm-import-ai-skills-btn');
     const cancelImportAiSkillsBtn = document.getElementById('cancel-import-ai-skills-btn');
     const aiSessionStatus = document.getElementById('ai-session-status');
+    const aiErrorDetails = document.getElementById('ai-error-details');
+    const aiErrorContent = document.getElementById('ai-error-content');
+    const copyAiErrorBtn = document.getElementById('copy-ai-error-btn');
     const copyAiReportBtn = document.getElementById('copy-ai-report-btn');
     const copyAiReportInlineBtn = document.getElementById('copy-ai-report-inline-btn');
     const desktopTextEditor = document.getElementById('desktop-text-editor');
@@ -174,6 +333,10 @@ document.addEventListener('DOMContentLoaded', async () => {
     const copyDesktopTextBtn = document.getElementById('copy-desktop-text-btn');
     const clearDesktopTextBtn = document.getElementById('clear-desktop-text-btn');
     const cancelEditTextBtn = document.getElementById('cancel-edit-text-btn');
+    const desktopCategorySelect = document.getElementById('desktop-category-select');
+    const addDesktopCategoryBtn = document.getElementById('add-desktop-category-btn');
+    const renameDesktopCategoryBtn = document.getElementById('rename-desktop-category-btn');
+    const deleteDesktopCategoryBtn = document.getElementById('delete-desktop-category-btn');
     const inputModeButtons = Array.from(document.querySelectorAll('[data-input-mode]'));
     const lastInputStatus = document.getElementById('last-input-status');
     const toastContainer = document.getElementById('toast-container');
@@ -191,6 +354,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     let serverStatus = 'disconnected';
     let serverReconnectTimer = null;
     let serverConnectInFlight = false;
+    let qrPairingMode = 'relay';
     const HISTORY_PAGE_SIZE = 100;
     const HISTORY_TOP_THRESHOLD = 24;
     let historyRecords = [];
@@ -221,6 +385,9 @@ document.addEventListener('DOMContentLoaded', async () => {
     let currentAiSessionId = null;
     let activeWorkspaceTab = 'history';
     let inputMode = 'direct';
+    const DEFAULT_HISTORY_CATEGORY = '语音输入';
+    let historyCategories = [DEFAULT_HISTORY_CATEGORY];
+    let selectedHistoryCategory = DEFAULT_HISTORY_CATEGORY;
     let historyFilters = {
         query: '',
         type: 'all',
@@ -228,7 +395,8 @@ document.addEventListener('DOMContentLoaded', async () => {
         device: 'all',
         status: 'all',
         sourceApp: 'all',
-        tag: ''
+        tag: '',
+        category: DEFAULT_HISTORY_CATEGORY
     };
     let historySelectionMode = false;
     const selectedHistoryIds = new Set();
@@ -258,9 +426,17 @@ document.addEventListener('DOMContentLoaded', async () => {
     function switchToPairingView() {
         pairingSection.style.display = 'flex';
         historySection.style.display = 'none';
-        if (serverStatus === 'connected') {
+        updateQrModeUi();
+        if (qrPairingMode === 'lan' || serverStatus === 'connected') {
             loadQrCode();
         }
+    }
+
+    function updateQrModeUi() {
+        if (!qrPairingModeLabel || !toggleQrModeBtn) return;
+        const relayMode = qrPairingMode === 'relay';
+        qrPairingModeLabel.textContent = relayMode ? '服务器中转扫码' : '局域网扫码配置';
+        toggleQrModeBtn.textContent = relayMode ? '切换为局域网扫码配置' : '切换为服务器中转扫码';
     }
 
     function syncAiPanelUi() {
@@ -331,6 +507,14 @@ document.addEventListener('DOMContentLoaded', async () => {
             historySourceAppFilter.disabled = activeWorkspaceTab !== 'notifications';
             if (activeWorkspaceTab !== 'notifications') {
                 historySourceAppFilter.value = 'all';
+            }
+        }
+        if (historyCategoryFilter) {
+            historyCategoryFilter.disabled = activeWorkspaceTab === 'notifications';
+            if (activeWorkspaceTab === 'notifications') {
+                historyCategoryFilter.value = 'all';
+            } else if (historyCategoryFilter.value === 'all' && selectedHistoryCategory) {
+                historyCategoryFilter.value = selectedHistoryCategory;
             }
         }
         if (clearHistoryBtn) {
@@ -416,6 +600,29 @@ document.addEventListener('DOMContentLoaded', async () => {
         }, duration);
     }
 
+    async function openC2Reader() {
+        debugC2Main('openC2Reader called');
+        if (!openC2ReaderBtn) {
+            debugC2Main('openC2Reader skipped: button missing');
+            return;
+        }
+        openC2ReaderBtn.disabled = true;
+        try {
+            debugC2Main('invoke open_c2_screen_reader start');
+            await invoke('open_c2_screen_reader');
+            debugC2Main('invoke open_c2_screen_reader ok');
+            showToast('二维码读取小窗已打开，可点击开始截图读取。', 'success', 3200);
+        } catch (error) {
+            debugC2Main(`invoke open_c2_screen_reader failed: ${String(error)}`);
+            console.error('打开二维码读取栏失败:', error);
+            const message = typeof error === 'string' ? error : error?.message || '打开二维码读取栏失败';
+            showToast(message, 'error', 6200);
+        } finally {
+            debugC2Main('openC2Reader finished');
+            openC2ReaderBtn.disabled = false;
+        }
+    }
+
     function buildExportOpenActions(savedPath) {
         if (!savedPath) return [];
         return [
@@ -497,21 +704,25 @@ document.addEventListener('DOMContentLoaded', async () => {
         }
     }
 
-    async function checkForUpdate() {
+    async function checkForUpdate({ silent = false } = {}) {
         if (updateBusy) return;
-        setUpdateUi('正在检查更新...', { busy: true, updateInfo: currentUpdateInfo });
+        if (!silent) {
+            setUpdateUi('正在检查更新...', { busy: true, updateInfo: currentUpdateInfo });
+        }
         try {
             const info = await invoke('check_app_update');
             currentUpdateInfo = info;
             const latestVersion = info?.latest_version || info?.latestVersion || '';
             if (info?.has_update || info?.hasUpdate) {
                 setUpdateUi(`发现 v${latestVersion}`, { busy: false, updateInfo: info });
-            } else {
+            } else if (!silent) {
                 setUpdateUi('当前已是最新版本', { busy: false, updateInfo: null });
             }
         } catch (error) {
             console.error('检查更新失败:', error);
-            setUpdateUi(`检查失败: ${error}`, { busy: false, updateInfo: null });
+            if (!silent) {
+                setUpdateUi(`检查失败: ${error}`, { busy: false, updateInfo: null });
+            }
         }
     }
 
@@ -552,6 +763,28 @@ document.addEventListener('DOMContentLoaded', async () => {
         if (tone) {
             aiSessionStatus.classList.add(tone);
         }
+    }
+
+    function clearAiErrorDetails() {
+        if (aiErrorDetails) {
+            aiErrorDetails.style.display = 'none';
+            aiErrorDetails.open = false;
+        }
+        if (aiErrorContent) aiErrorContent.textContent = '';
+    }
+
+    function showAiErrorDetails(error, { requestId = currentAssistantRequestId, source = '电脑端' } = {}) {
+        if (!aiErrorDetails || !aiErrorContent) return;
+        const message = typeof error === 'string' ? error : error?.message || String(error || '未知错误');
+        const lines = [
+            `时间: ${formatDateTime(Date.now())}`,
+            `来源: ${source}`,
+            `请求 ID: ${requestId || '未提供'}`,
+            `错误: ${message}`
+        ];
+        aiErrorContent.textContent = lines.join('\n');
+        aiErrorDetails.style.display = 'block';
+        aiErrorDetails.open = true;
     }
 
     async function loadAiSkills() {
@@ -609,6 +842,9 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     function renderAiSessions() {
         if (!aiSessionList) return;
+        const hasCurrentSession = Boolean(currentAiSessionId && aiSessions.some(session => session.id === currentAiSessionId));
+        if (renameAiSessionBtn) renameAiSessionBtn.disabled = !hasCurrentSession;
+        if (deleteAiSessionBtn) deleteAiSessionBtn.disabled = !hasCurrentSession;
         if (!aiSessions.length) {
             aiSessionList.innerHTML = aiAssistantPlaceholder('sessions');
             return;
@@ -782,6 +1018,9 @@ document.addEventListener('DOMContentLoaded', async () => {
         if (result.statusMessage) {
             setAiSessionStatus(result.statusMessage, result.statusTone || '');
         }
+        if (payload.event === 'assistant_error') {
+            showAiErrorDetails(payload.message || 'AI 助手执行失败。', { requestId: payload.request_id });
+        }
     }
 
     async function forwardRemoteAiEvent(payload = {}) {
@@ -921,6 +1160,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         renderAiMessages();
         renderAiToolCalls();
         renderAiExportedFiles();
+        clearAiErrorDetails();
         setAiSessionStatus('已准备新会话。');
     }
 
@@ -933,6 +1173,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         }
 
         try {
+            clearAiErrorDetails();
             currentAssistantRequestId = createAiReportRequestId('assistant');
             stoppedAssistantRequestIds.delete(currentAssistantRequestId);
             aiChatShouldAutoScroll = true;
@@ -984,6 +1225,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             renderAiMessages();
             const message = typeof error === 'string' ? error : error?.message || '创建会话失败';
             setAiSessionStatus(message, 'error');
+            showAiErrorDetails(error, { requestId: currentAssistantRequestId });
         } finally {
             stopAiSessionBtn.style.display = 'none';
             currentAssistantRequestId = null;
@@ -1335,6 +1577,8 @@ document.addEventListener('DOMContentLoaded', async () => {
                     return getSelectLabel(historyStatusFilter, fallback);
                 case 'sourceApp':
                     return getSelectLabel(historySourceAppFilter, fallback);
+                case 'category':
+                    return getSelectLabel(historyCategoryFilter, fallback);
                 default:
                     return fallback;
             }
@@ -1384,6 +1628,13 @@ document.addEventListener('DOMContentLoaded', async () => {
             '全部 App',
             Array.from(new Set(historyRecords.map(recordSourceAppKey).filter(Boolean))).sort()
         );
+        syncSelectOptions(
+            historyCategoryFilter,
+            historyFilters.category,
+            '全部目录',
+            historyCategories
+        );
+        syncDesktopCategoryOptions();
     }
 
     function syncSelectOptions(selectEl, currentValue, allLabel, values) {
@@ -1400,6 +1651,102 @@ document.addEventListener('DOMContentLoaded', async () => {
         selectEl.value = nextValues.includes(currentValue) ? currentValue : 'all';
     }
 
+    function syncDesktopCategoryOptions() {
+        if (!desktopCategorySelect) return;
+        const nextValues = Array.from(new Set([DEFAULT_HISTORY_CATEGORY, ...historyCategories])).filter(Boolean);
+        if (!nextValues.includes(selectedHistoryCategory)) {
+            selectedHistoryCategory = DEFAULT_HISTORY_CATEGORY;
+        }
+        desktopCategorySelect.innerHTML = nextValues.map(value => {
+            return `<option value="${escapeHtml(value)}">${escapeHtml(value)}</option>`;
+        }).join('');
+        desktopCategorySelect.value = selectedHistoryCategory;
+        const canEdit = selectedHistoryCategory !== DEFAULT_HISTORY_CATEGORY;
+        if (renameDesktopCategoryBtn) renameDesktopCategoryBtn.disabled = !canEdit;
+        if (deleteDesktopCategoryBtn) deleteDesktopCategoryBtn.disabled = !canEdit;
+    }
+
+    async function refreshHistoryCategories() {
+        try {
+            const categories = await invoke('list_history_categories');
+            historyCategories = Array.isArray(categories) && categories.length
+                ? categories
+                : [DEFAULT_HISTORY_CATEGORY];
+        } catch (error) {
+            console.error('加载目录失败:', error);
+            historyCategories = [DEFAULT_HISTORY_CATEGORY];
+        }
+        syncDesktopCategoryOptions();
+        if (historyCategoryFilter) {
+            syncSelectOptions(historyCategoryFilter, historyFilters.category, '全部目录', historyCategories);
+        }
+    }
+
+    async function createHistoryCategory() {
+        const name = window.prompt('新建目录名称', '');
+        const normalized = String(name || '').trim();
+        if (!normalized) return;
+        try {
+            historyCategories = await invoke('add_history_category', { category: normalized });
+            selectedHistoryCategory = normalized;
+            await refreshHistoryCategories();
+            if (historyCategoryFilter) historyCategoryFilter.value = normalized;
+            syncHistoryFilterStateFromControls();
+            await loadHistoryPage({ reset: true });
+            setDesktopTextStatus(`已新建目录：${normalized}`, 'success');
+        } catch (error) {
+            const message = typeof error === 'string' ? error : error?.message || '新建目录失败';
+            setDesktopTextStatus(message, 'error');
+        }
+    }
+
+    async function renameHistoryCategory() {
+        if (selectedHistoryCategory === DEFAULT_HISTORY_CATEGORY) return;
+        const name = window.prompt('修改目录名称', selectedHistoryCategory);
+        const normalized = String(name || '').trim();
+        if (!normalized || normalized === selectedHistoryCategory) return;
+        try {
+            historyCategories = await invoke('rename_history_category', {
+                oldName: selectedHistoryCategory,
+                newName: normalized
+            });
+            selectedHistoryCategory = normalized;
+            historyFilters.category = normalized;
+            await refreshHistoryCategories();
+            if (historyCategoryFilter) historyCategoryFilter.value = normalized;
+            syncHistoryFilterStateFromControls();
+            await loadHistoryPage({ reset: true });
+            setDesktopTextStatus(`目录已修改为：${normalized}`, 'success');
+        } catch (error) {
+            const message = typeof error === 'string' ? error : error?.message || '修改目录失败';
+            setDesktopTextStatus(message, 'error');
+        }
+    }
+
+    async function deleteHistoryCategory() {
+        if (selectedHistoryCategory === DEFAULT_HISTORY_CATEGORY) return;
+        const category = selectedHistoryCategory;
+        const shouldDelete = await confirmDialog({
+            title: '删除目录',
+            message: `确定删除“${category}”吗？该目录下的历史记录会移到“${DEFAULT_HISTORY_CATEGORY}”。`,
+            okText: '删除'
+        });
+        if (!shouldDelete) return;
+        try {
+            historyCategories = await invoke('delete_history_category', { category });
+            selectedHistoryCategory = DEFAULT_HISTORY_CATEGORY;
+            historyFilters.category = DEFAULT_HISTORY_CATEGORY;
+            await refreshHistoryCategories();
+            if (historyCategoryFilter) historyCategoryFilter.value = DEFAULT_HISTORY_CATEGORY;
+            syncHistoryFilterStateFromControls();
+            await loadHistoryPage({ reset: true });
+            setDesktopTextStatus(`已删除目录：${category}`, 'success');
+        } catch (error) {
+            const message = typeof error === 'string' ? error : error?.message || '删除目录失败';
+            setDesktopTextStatus(message, 'error');
+        }
+    }
+
     function syncHistoryFilterStateFromControls() {
         historyFilters = {
             query: historySearchInput?.value || '',
@@ -1408,7 +1755,10 @@ document.addEventListener('DOMContentLoaded', async () => {
             device: historyDeviceFilter?.value || 'all',
             status: historyStatusFilter?.value || 'all',
             sourceApp: historySourceAppFilter?.value || 'all',
-            tag: historyTagFilter?.value || ''
+            tag: historyTagFilter?.value || '',
+            category: activeWorkspaceTab === 'notifications'
+                ? 'all'
+                : (historyCategoryFilter?.value || selectedHistoryCategory || DEFAULT_HISTORY_CATEGORY)
         };
     }
 
@@ -1420,6 +1770,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         if (historyStatusFilter) historyStatusFilter.value = 'all';
         if (historySourceAppFilter) historySourceAppFilter.value = 'all';
         if (historyTagFilter) historyTagFilter.value = '';
+        if (historyCategoryFilter) historyCategoryFilter.value = 'all';
         syncHistoryFilterStateFromControls();
         renderHistory({ mode: 'reset' });
     }
@@ -1434,7 +1785,8 @@ document.addEventListener('DOMContentLoaded', async () => {
             historyFilters.device !== 'all',
             historyFilters.status !== 'all',
             historyFilters.sourceApp !== 'all',
-            historyFilters.tag.trim()
+            historyFilters.tag.trim(),
+            historyFilters.category !== 'all'
         ].filter(Boolean).length;
         historyFilterSummary.textContent = activeCount
             ? `已筛选 ${filteredCount} / ${total} 条`
@@ -1518,7 +1870,10 @@ document.addEventListener('DOMContentLoaded', async () => {
                     content
                 });
             } else {
-                record = await invoke('create_desktop_text_record', { content });
+                record = await invoke('create_desktop_text_record', {
+                    content,
+                    category: selectedHistoryCategory
+                });
             }
 
             if (record) {
@@ -1781,7 +2136,8 @@ document.addEventListener('DOMContentLoaded', async () => {
                 deliveryStatus: null,
                 favorite: null,
                 pinned: null,
-                tag: null
+                tag: null,
+                category: null
             });
             const savedPath = result?.saved_path || result?.savedPath;
             const formatLabel = String(format || 'word').toUpperCase();
@@ -1805,10 +2161,10 @@ document.addEventListener('DOMContentLoaded', async () => {
         else if (status === 'connecting') serverDot.classList.add('connecting');
         else if (status === 'error') serverDot.classList.add('error');
 
-        if (status === 'connected' && !isPaired) {
+        if (status === 'connected' && !isPaired && qrPairingMode === 'relay') {
             loadQrCode();
         }
-        if (status !== 'connected') {
+        if (status !== 'connected' && qrPairingMode === 'relay') {
             qrArea.style.display = 'none';
         }
 
@@ -2003,9 +2359,16 @@ document.addEventListener('DOMContentLoaded', async () => {
     // ===== 2. 鍔犺浇閰嶇疆 =====
     try {
         await loadAppVersion();
+        checkForUpdate({ silent: true });
+        await refreshHistoryCategories();
         await loadHistory();
         const config = await invoke('get_config');
         console.log('配置已加载:', config);
+        const hasPairedDevices = Array.isArray(config.paired_devices) && config.paired_devices.length > 0;
+        if (!hasPairedDevices && !config.server_mode_enabled) {
+            await invoke('set_server_mode', { enabled: true });
+            config.server_mode_enabled = true;
+        }
         serverModeToggle.checked = config.server_mode_enabled;
         serverUrlInput.value = config.server_url;
         setInputModeUi(config.input_mode || 'direct');
@@ -2022,7 +2385,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         }
         switchWorkspaceTab('history');
 
-        if (config.paired_devices && config.paired_devices.length > 0) {
+        if (hasPairedDevices) {
             isPaired = true;
             const firstDevice = config.paired_devices[0];
             connectedDeviceId = firstDevice.device_id;
@@ -2076,6 +2439,15 @@ document.addEventListener('DOMContentLoaded', async () => {
         const visible = toolbarSettingsMenuController.isVisible();
         setToolbarSettingsMenuVisible(!visible);
         setHistoryExportMenuVisible(false);
+    });
+
+    openC2ReaderBtn?.addEventListener('click', async (event) => {
+        debugC2Main('open-c2-reader button click handler entered');
+        event.stopPropagation();
+        setToolbarSettingsMenuVisible(false);
+        setHistoryExportMenuVisible(false);
+        setHistoryMoreMenuVisible(false);
+        await openC2Reader();
     });
 
     historyExportMenuBtn?.addEventListener('click', (event) => {
@@ -2201,6 +2573,63 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     newAiSessionBtn?.addEventListener('click', () => {
         resetAiConversationDraft();
+    });
+
+    renameAiSessionBtn?.addEventListener('click', async () => {
+        const session = aiSessions.find(item => item.id === currentAiSessionId);
+        if (!session) return;
+        const title = window.prompt('输入新的会话名称', session.title || '新会话');
+        if (title === null) return;
+        if (!title.trim()) {
+            setAiSessionStatus('会话名称不能为空。', 'error');
+            return;
+        }
+        try {
+            await invoke('rename_ai_session', { sessionId: session.id, title: title.trim() });
+            await loadAiSessions();
+            setAiSessionStatus('会话已重命名。', 'success');
+        } catch (error) {
+            console.error('重命名 AI 会话失败:', error);
+            const message = typeof error === 'string' ? error : error?.message || '重命名失败';
+            setAiSessionStatus(message, 'error');
+        }
+    });
+
+    deleteAiSessionBtn?.addEventListener('click', async () => {
+        const session = aiSessions.find(item => item.id === currentAiSessionId);
+        if (!session) return;
+        const confirmed = await confirmDialog({
+            title: '删除 AI 会话',
+            message: `确定删除“${session.title || '新会话'}”吗？会话中的消息和工具调用记录也会一并删除。`,
+            okText: '删除'
+        });
+        if (!confirmed) return;
+        try {
+            await invoke('delete_ai_session', { sessionId: session.id });
+            currentAiSessionId = null;
+            aiMessages = [];
+            aiToolCalls = [];
+            aiExportedFiles = [];
+            clearAiErrorDetails();
+            await loadAiSessions({ selectLatest: true });
+            setAiSessionStatus('会话已删除。', 'success');
+        } catch (error) {
+            console.error('删除 AI 会话失败:', error);
+            const message = typeof error === 'string' ? error : error?.message || '删除失败';
+            setAiSessionStatus(message, 'error');
+        }
+    });
+
+    copyAiErrorBtn?.addEventListener('click', async () => {
+        const content = aiErrorContent?.textContent || '';
+        if (!content) return;
+        try {
+            await invoke('copy_text_to_clipboard', { content });
+            setAiSessionStatus('错误详情已复制。', 'success');
+        } catch (error) {
+            console.error('复制 AI 错误详情失败:', error);
+            setAiSessionStatus('复制错误详情失败。', 'error');
+        }
     });
 
     exportAiSessionWordBtn?.addEventListener('click', async () => {
@@ -2357,8 +2786,17 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     // ===== 浜岀淮鐮?=====
     async function loadQrCode() {
+        updateQrModeUi();
+        if (qrPairingMode === 'relay' && serverStatus !== 'connected') {
+            qrArea.style.display = 'none';
+            const url = serverUrlInput.value.trim();
+            if (serverModeToggle.checked && url) {
+                doConnectServer(url);
+            }
+            return;
+        }
         try {
-            const dataUrl = await invoke('generate_pairing_qr');
+            const dataUrl = await invoke('generate_pairing_qr', { mode: qrPairingMode });
             qrCodeImg.src = dataUrl;
             qrArea.style.display = 'flex';
         } catch (e) {
@@ -2366,6 +2804,10 @@ document.addEventListener('DOMContentLoaded', async () => {
         }
     }
     refreshQrBtn.addEventListener('click', loadQrCode);
+    toggleQrModeBtn?.addEventListener('click', () => {
+        qrPairingMode = qrPairingMode === 'relay' ? 'lan' : 'relay';
+        loadQrCode();
+    });
 
     checkUpdateBtn.addEventListener('click', async () => {
         await checkForUpdate();
@@ -2427,7 +2869,8 @@ document.addEventListener('DOMContentLoaded', async () => {
                 deliveryStatus: currentHistoryDeliveryStatusFilter(),
                 favorite: currentHistoryFavoriteFilter(),
                 pinned: currentHistoryPinnedFilter(),
-                tag: normalizedHistoryFilterValue(historyFilters.tag)
+                tag: normalizedHistoryFilterValue(historyFilters.tag),
+                category: normalizedHistoryFilterValue(historyFilters.category)
             });
             const pageRecords = Array.isArray(page?.records) ? page.records : [];
 
@@ -2569,7 +3012,8 @@ document.addEventListener('DOMContentLoaded', async () => {
                 deliveryStatus: null,
                 favorite: null,
                 pinned: null,
-                tag: null
+                tag: null,
+                category: notificationTab ? null : normalizedHistoryFilterValue(historyFilters.category)
             });
             const savedPath = result?.saved_path || result?.savedPath;
             setDesktopTextStatus(
@@ -2601,11 +3045,12 @@ document.addEventListener('DOMContentLoaded', async () => {
             deliveryStatus: currentHistoryDeliveryStatusFilter(),
             favorite: currentHistoryFavoriteFilter(),
             pinned: currentHistoryPinnedFilter(),
-            tag: normalizedHistoryFilterValue(historyFilters.tag)
+            tag: normalizedHistoryFilterValue(historyFilters.tag),
+            category: normalizedHistoryFilterValue(historyFilters.category)
         });
     }
 
-    async function exportHistoryWithFilters({ label, format = 'csv', search, contentType, via, fromDevice, sourceApp, deliveryStatus, favorite, pinned, tag }) {
+    async function exportHistoryWithFilters({ label, format = 'csv', search, contentType, via, fromDevice, sourceApp, deliveryStatus, favorite, pinned, tag, category }) {
         try {
             const result = await invoke('export_message_history', {
                 startAt: null,
@@ -2621,7 +3066,8 @@ document.addEventListener('DOMContentLoaded', async () => {
                 deliveryStatus,
                 favorite,
                 pinned,
-                tag
+                tag,
+                category
             });
             const savedPath = result?.saved_path || result?.savedPath;
             const formatLabel = String(format || 'csv').toUpperCase();
@@ -2649,7 +3095,8 @@ document.addEventListener('DOMContentLoaded', async () => {
             deliveryStatus: null,
             favorite: null,
             pinned: null,
-            tag: null
+            tag: null,
+            category: null
         });
     }
 
@@ -2861,7 +3308,8 @@ document.addEventListener('DOMContentLoaded', async () => {
         historyDeviceFilter,
         historyStatusFilter,
         historySourceAppFilter,
-        historyTagFilter
+        historyTagFilter,
+        historyCategoryFilter
     ].forEach(control => {
         if (!control) return;
         control.addEventListener('input', () => {
@@ -2932,6 +3380,28 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     deleteSelectedHistoryBtn?.addEventListener('click', async () => {
         await deleteSelectedHistoryRecords();
+    });
+
+    desktopCategorySelect?.addEventListener('change', () => {
+        selectedHistoryCategory = desktopCategorySelect.value || DEFAULT_HISTORY_CATEGORY;
+        if (historyCategoryFilter && activeWorkspaceTab === 'history') {
+            historyCategoryFilter.value = selectedHistoryCategory;
+            syncHistoryFilterStateFromControls();
+            loadHistoryPage({ reset: true });
+        }
+        syncDesktopCategoryOptions();
+    });
+
+    addDesktopCategoryBtn?.addEventListener('click', async () => {
+        await createHistoryCategory();
+    });
+
+    renameDesktopCategoryBtn?.addEventListener('click', async () => {
+        await renameHistoryCategory();
+    });
+
+    deleteDesktopCategoryBtn?.addEventListener('click', async () => {
+        await deleteHistoryCategory();
     });
 
     loadMoreHistoryBtn.addEventListener('click', async () => {

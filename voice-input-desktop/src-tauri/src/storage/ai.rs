@@ -221,6 +221,34 @@ pub fn update_session_metadata(
     get_session(id)?.ok_or_else(|| anyhow!("session missing after update"))
 }
 
+pub fn rename_session(id: &str, title: String) -> Result<AiSession> {
+    let title = title.trim();
+    if title.is_empty() {
+        return Err(anyhow!("session title cannot be empty"));
+    }
+    update_session_metadata(id, Some(title.to_string()), None, None)
+}
+
+pub fn delete_session(id: &str) -> Result<()> {
+    let mut conn = open_connection()?;
+    let transaction = conn.transaction()?;
+    let exists = transaction.query_row(
+        "SELECT EXISTS(SELECT 1 FROM ai_sessions WHERE id = ?1)",
+        [id],
+        |row| row.get::<_, bool>(0),
+    )?;
+    if !exists {
+        return Err(anyhow!("session not found"));
+    }
+
+    transaction.execute("DELETE FROM ai_exported_files WHERE session_id = ?1", [id])?;
+    transaction.execute("DELETE FROM ai_tool_calls WHERE session_id = ?1", [id])?;
+    transaction.execute("DELETE FROM ai_messages WHERE session_id = ?1", [id])?;
+    transaction.execute("DELETE FROM ai_sessions WHERE id = ?1", [id])?;
+    transaction.commit()?;
+    Ok(())
+}
+
 pub fn add_message(
     session_id: String,
     role: String,

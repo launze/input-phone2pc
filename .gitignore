@@ -79,3 +79,4 @@ CLAUDE.md
 
 # Local deploy secrets
 .deploy/
+artifacts/remote-build/remote-build-secrets.local.md

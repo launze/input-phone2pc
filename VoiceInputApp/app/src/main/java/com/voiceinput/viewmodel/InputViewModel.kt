@@ -1,8 +1,13 @@
 package com.voiceinput.viewmodel
 
 import android.app.Application
+import android.content.ContentValues
 import android.net.Uri
+import android.os.Build
+import android.os.Environment
+import android.util.Base64
 import android.util.Log
+import android.provider.MediaStore
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.voiceinput.BuildConfig
@@ -46,6 +51,7 @@ import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.io.File
 import java.io.OutputStreamWriter
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -81,6 +87,14 @@ class InputViewModel(application: Application) : AndroidViewModel(application) {
 
     private val _historyItems = MutableStateFlow<List<HistoryItem>>(emptyList())
     val historyItems: StateFlow<List<HistoryItem>> = _historyItems.asStateFlow()
+
+    private val _historyCategories =
+        MutableStateFlow(listOf(HistoryRepository.DEFAULT_CATEGORY))
+    val historyCategories: StateFlow<List<String>> = _historyCategories.asStateFlow()
+
+    private val _selectedHistoryCategory =
+        MutableStateFlow(HistoryRepository.DEFAULT_CATEGORY)
+    val selectedHistoryCategory: StateFlow<String> = _selectedHistoryCategory.asStateFlow()
 
     private val _visibleHistoryItems = MutableStateFlow<List<HistoryItem>>(emptyList())
     val visibleHistoryItems: StateFlow<List<HistoryItem>> = _visibleHistoryItems.asStateFlow()
@@ -125,6 +139,10 @@ class InputViewModel(application: Application) : AndroidViewModel(application) {
         refreshPairedDevices()
         restoreSelectedRelayDevice()
         updateSendAvailability()
+
+        viewModelScope.launch {
+            refreshHistoryCategories()
+        }
 
         viewModelScope.launch {
             loadInitialVisibleHistory(force = true)
@@ -859,10 +877,16 @@ class InputViewModel(application: Application) : AndroidViewModel(application) {
         deviceId: String,
         deviceName: String,
         localIp: String = "",
-        localPort: Int = 0
+        localPort: Int = 0,
+        pairingMode: String = "relay"
     ) {
         viewModelScope.launch {
-            addLog("扫码结果: 设备=$deviceName, IP=$localIp:$localPort")
+            val normalizedPairingMode = if (pairingMode.equals("lan", ignoreCase = true)) {
+                "lan"
+            } else {
+                "relay"
+            }
+            addLog("扫码结果: 设备=$deviceName, 模式=$normalizedPairingMode, IP=$localIp:$localPort")
             pendingScannedPair = PendingScannedPair(
                 serverUrl = serverUrl,
                 deviceId = deviceId,
@@ -871,44 +895,9 @@ class InputViewModel(application: Application) : AndroidViewModel(application) {
                 localPort = localPort
             )
 
-            val serverModeEnabled = configManager.isServerModeEnabled()
-            if (serverModeEnabled) {
-                addLog("服务器中转已启用，直接使用服务器中转...")
-                if (serverUrl.isBlank()) {
-                    addLog("无服务器地址")
-                    pendingScannedPair = null
-                    return@launch
-                }
-
-                val currentUrl = configManager.getServerUrl()
-                val shouldReconnect =
-                    !serverConnection.isConnected() || !currentUrl.equals(serverUrl, ignoreCase = true)
-
-                if (!currentUrl.equals(serverUrl, ignoreCase = true)) {
-                    configManager.saveServerUrl(serverUrl)
-                }
-
-                if (shouldReconnect) {
-                    disconnectFromServer()
-                    delay(300)
-                    connectToServer(serverUrl)
-                    val connected = waitForServerConnected(timeoutMs = 10_000)
-                    if (!connected) {
-                        addLog("服务器连接失败，无法发起配对")
-                        pendingScannedPair = null
-                        return@launch
-                    }
-                }
-
-                if (serverConnection.isConnected()) {
-                    val myDeviceId = configManager.getDeviceId()
-                    val myDeviceName = configManager.getDeviceName()
-                    serverConnection.sendPairRequest(myDeviceId, myDeviceName, deviceId)
-                    addLog("已发送服务器配对请求到 $deviceName")
-                } else {
-                    addLog("服务器连接失败，无法配对")
-                    pendingScannedPair = null
-                }
+            if (normalizedPairingMode == "relay") {
+                addLog("按二维码配置使用服务器中转配对...")
+                pairViaRelayServer(serverUrl, deviceId, deviceName)
                 return@launch
             }
 
@@ -944,42 +933,50 @@ class InputViewModel(application: Application) : AndroidViewModel(application) {
                 addLog("局域网连接失败，尝试服务器中转...")
             }
 
-            if (serverUrl.isBlank()) {
-                addLog("无服务器地址且局域网连接失败")
+            pairViaRelayServer(serverUrl, deviceId, deviceName)
+        }
+    }
+
+    private suspend fun pairViaRelayServer(
+        serverUrl: String,
+        deviceId: String,
+        deviceName: String
+    ) {
+        if (serverUrl.isBlank()) {
+            addLog("无服务器地址，无法发起服务器中转配对")
+            pendingScannedPair = null
+            return
+        }
+
+        val currentUrl = configManager.getServerUrl()
+        val shouldReconnect =
+            !serverConnection.isConnected() || !currentUrl.equals(serverUrl, ignoreCase = true)
+
+        if (!currentUrl.equals(serverUrl, ignoreCase = true)) {
+            configManager.saveServerUrl(serverUrl)
+        }
+        configManager.saveServerModeEnabled(true)
+
+        if (shouldReconnect) {
+            disconnectFromServer()
+            delay(300)
+            connectToServer(serverUrl)
+            val connected = waitForServerConnected(timeoutMs = 10_000)
+            if (!connected) {
+                addLog("服务器连接失败，无法发起配对")
                 pendingScannedPair = null
-                return@launch
+                return
             }
+        }
 
-            val currentUrl = configManager.getServerUrl()
-            val shouldReconnect =
-                !serverConnection.isConnected() || !currentUrl.equals(serverUrl, ignoreCase = true)
-
-            if (!currentUrl.equals(serverUrl, ignoreCase = true)) {
-                configManager.saveServerUrl(serverUrl)
-            }
-            configManager.saveServerModeEnabled(true)
-
-            if (shouldReconnect) {
-                disconnectFromServer()
-                delay(300)
-                connectToServer(serverUrl)
-                val connected = waitForServerConnected(timeoutMs = 10_000)
-                if (!connected) {
-                    addLog("服务器连接失败，无法发起配对")
-                    pendingScannedPair = null
-                    return@launch
-                }
-            }
-
-            if (serverConnection.isConnected()) {
-                val myDeviceId = configManager.getDeviceId()
-                val myDeviceName = configManager.getDeviceName()
-                serverConnection.sendPairRequest(myDeviceId, myDeviceName, deviceId)
-                addLog("已发送服务器配对请求到 $deviceName")
-            } else {
-                addLog("服务器连接失败，无法配对")
-                pendingScannedPair = null
-            }
+        if (serverConnection.isConnected()) {
+            val myDeviceId = configManager.getDeviceId()
+            val myDeviceName = configManager.getDeviceName()
+            serverConnection.sendPairRequest(myDeviceId, myDeviceName, deviceId)
+            addLog("已发送服务器配对请求到 $deviceName")
+        } else {
+            addLog("服务器连接失败，无法配对")
+            pendingScannedPair = null
         }
     }
 
@@ -1086,19 +1083,51 @@ class InputViewModel(application: Application) : AndroidViewModel(application) {
         size: Long
     ) {
         viewModelScope.launch {
-            if (!ensureFileSendRoute()) {
-                addLog("未连接服务器，无法发送扫码文件")
-                _uiMessages.tryEmit("未连接服务器，无法发送扫码文件")
-                return@launch
-            }
-
             val payload = ClipboardFilePayload(
                 mimeType = mimeType.ifBlank { "application/octet-stream" },
                 fileName = fileName.ifBlank { "scanned-file-${System.currentTimeMillis()}" },
                 data = base64Data,
                 size = size
             )
-            sendFileViaRelay(payload)
+
+            val savedPath = try {
+                saveScannedFileToPhone(payload)
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to save scanned file", e)
+                addLog("扫码文件保存失败: ${e.message ?: "未知错误"}")
+                _uiMessages.tryEmit("扫码文件保存失败")
+                return@launch
+            }
+
+            val historyItem = createHistoryItem(
+                text = "[扫码文件] ${payload.fileName}",
+                targetDeviceId = "",
+                targetDeviceName = "本机",
+                contentType = "file",
+                channel = "local",
+                syncStatus = SyncStatus.STORED,
+                metadata = fileHistoryMetadata(payload, savedPath)
+            ).copy(
+                storedAt = System.currentTimeMillis(),
+                errorMessage = "扫码文件已保存到手机"
+            )
+            addHistoryItem(historyItem)
+            addLog("扫码文件已保存到手机: $savedPath")
+            _uiMessages.tryEmit("扫码文件已保存到手机")
+
+            if (!ensureFileSendRoute()) {
+                addLog("未连接服务器，扫码文件仅保存在手机")
+                return@launch
+            }
+
+            if (relayTargetDeviceId != null && serverConnection.isConnected()) {
+                sendFileViaRelay(
+                    payload = payload,
+                    existingHistoryId = historyItem.id,
+                    savedPath = savedPath,
+                    keepLocalOnFailure = true
+                )
+            }
         }
     }
 
@@ -1258,6 +1287,7 @@ class InputViewModel(application: Application) : AndroidViewModel(application) {
             addProperty("text", text)
             addProperty("press_enter", pressEnter)
             addProperty("timestamp", System.currentTimeMillis())
+            addProperty("category", selectedCategoryForNewItem("text"))
         }
 
         val historyItem = createHistoryItem(
@@ -1332,6 +1362,7 @@ class InputViewModel(application: Application) : AndroidViewModel(application) {
             addProperty("height", payload.height)
             addProperty("size", payload.size)
             addProperty("timestamp", System.currentTimeMillis())
+            addProperty("category", selectedCategoryForNewItem("image"))
         }
 
         val historyItem = createHistoryItem(
@@ -1363,7 +1394,12 @@ class InputViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    private suspend fun sendFileViaRelay(payload: ClipboardFilePayload) {
+    private suspend fun sendFileViaRelay(
+        payload: ClipboardFilePayload,
+        existingHistoryId: String? = null,
+        savedPath: String? = null,
+        keepLocalOnFailure: Boolean = false
+    ) {
         val targetId = relayTargetDeviceId ?: return
         val targetName = relayTargetDeviceName ?: targetId
         val relayPayload = JsonObject().apply {
@@ -1373,9 +1409,10 @@ class InputViewModel(application: Application) : AndroidViewModel(application) {
             addProperty("data", payload.data)
             addProperty("size", payload.size)
             addProperty("timestamp", System.currentTimeMillis())
+            addProperty("category", selectedCategoryForNewItem("file"))
         }
 
-        val historyItem = createHistoryItem(
+        val historyItemId = existingHistoryId ?: createHistoryItem(
             text = "[文件] ${payload.fileName}",
             targetDeviceId = targetId,
             targetDeviceName = targetName,
@@ -1383,24 +1420,56 @@ class InputViewModel(application: Application) : AndroidViewModel(application) {
             channel = "server",
             syncStatus = SyncStatus.PENDING,
             metadata = fileHistoryMetadata(payload)
-        )
-        relayPayload.addProperty("client_message_id", historyItem.id)
-        addHistoryItem(historyItem)
+        ).also { historyItem ->
+            addHistoryItem(historyItem)
+        }.id
 
-        pendingRelayHistoryIds.addLast(historyItem.id)
-        if (serverConnection.sendRelayMessage(targetId, relayPayload)) {
-            addLog("已发送文件到 $targetName (中转): ${payload.fileName}")
-            _uiMessages.tryEmit("文件已发送")
-        } else {
-            pendingRelayHistoryIds.remove(historyItem.id)
-            updateHistoryItem(historyItem.id) { item ->
+        if (existingHistoryId != null) {
+            updateHistoryItem(existingHistoryId) { item ->
                 item.copy(
-                    syncStatus = SyncStatus.FAILED,
-                    errorMessage = "文件发送失败，未能提交到服务器"
+                    targetDeviceId = targetId,
+                    targetDeviceName = targetName,
+                    channel = "server",
+                    syncStatus = SyncStatus.PENDING,
+                    errorMessage = null,
+                    metadata = fileHistoryMetadata(payload, savedPath)
                 )
             }
+        }
+
+        relayPayload.addProperty("client_message_id", historyItemId)
+        pendingRelayHistoryIds.addLast(historyItemId)
+        if (serverConnection.sendRelayMessage(targetId, relayPayload)) {
+            addLog("已发送文件到 $targetName (中转): ${payload.fileName}")
+            _uiMessages.tryEmit(if (keepLocalOnFailure) "文件已保存到手机，正在发送到电脑" else "文件已发送")
+        } else {
+            pendingRelayHistoryIds.remove(historyItemId)
+            updateHistoryItem(historyItemId) { item ->
+                if (keepLocalOnFailure) {
+                    item.copy(
+                        targetDeviceId = "",
+                        targetDeviceName = "本机",
+                        channel = "local",
+                        syncStatus = SyncStatus.STORED,
+                        storedAt = item.storedAt ?: System.currentTimeMillis(),
+                        errorMessage = "文件已保存到手机，未能提交到服务器",
+                        metadata = fileHistoryMetadata(payload, savedPath)
+                    )
+                } else {
+                    item.copy(
+                        syncStatus = SyncStatus.FAILED,
+                        errorMessage = "文件发送失败，未能提交到服务器"
+                    )
+                }
+            }
             addLog("文件发送失败")
-            _uiMessages.tryEmit("文件发送失败，未提交到服务器")
+            _uiMessages.tryEmit(
+                if (keepLocalOnFailure) {
+                    "文件已保存到手机，未提交到服务器"
+                } else {
+                    "文件发送失败，未提交到服务器"
+                }
+            )
         }
     }
 
@@ -1604,6 +1673,67 @@ class InputViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun selectHistoryCategory(category: String) {
+        val normalized = normalizeHistoryCategory(category)
+        if (_selectedHistoryCategory.value == normalized) {
+            return
+        }
+        _selectedHistoryCategory.value = normalized
+        _historyInitialLoaded.value = false
+        viewModelScope.launch {
+            loadInitialVisibleHistory(force = true)
+        }
+    }
+
+    fun addHistoryCategory(category: String) {
+        val normalized = normalizeHistoryCategory(category)
+        if (normalized.isBlank()) {
+            return
+        }
+        viewModelScope.launch {
+            val nextCategories = (_historyCategories.value + normalized)
+                .distinct()
+                .sortedWith(defaultCategoryFirstComparator())
+            historyRepository.saveCategories(nextCategories)
+            _historyCategories.value = historyRepository.loadCategories()
+            _selectedHistoryCategory.value = normalized
+            loadInitialVisibleHistory(force = true)
+        }
+    }
+
+    fun renameHistoryCategory(oldName: String, newName: String) {
+        val oldCategory = normalizeHistoryCategory(oldName)
+        val newCategory = normalizeHistoryCategory(newName)
+        if (
+            oldCategory == HistoryRepository.DEFAULT_CATEGORY ||
+            newCategory.isBlank() ||
+            oldCategory == newCategory
+        ) {
+            return
+        }
+        viewModelScope.launch {
+            _historyCategories.value = historyRepository.renameCategory(oldCategory, newCategory)
+            _historyItems.value = historyRepository.loadHistory()
+            _selectedHistoryCategory.value = newCategory
+            loadInitialVisibleHistory(force = true)
+        }
+    }
+
+    fun deleteHistoryCategory(category: String) {
+        val normalized = normalizeHistoryCategory(category)
+        if (normalized == HistoryRepository.DEFAULT_CATEGORY) {
+            return
+        }
+        viewModelScope.launch {
+            _historyCategories.value = historyRepository.deleteCategory(normalized)
+            _historyItems.value = historyRepository.loadHistory()
+            if (_selectedHistoryCategory.value == normalized) {
+                _selectedHistoryCategory.value = HistoryRepository.DEFAULT_CATEGORY
+            }
+            loadInitialVisibleHistory(force = true)
+        }
+    }
+
     fun clearAllHistory() {
         viewModelScope.launch {
             historyRepository.clearHistory()
@@ -1613,6 +1743,7 @@ class InputViewModel(application: Application) : AndroidViewModel(application) {
             _historyLoadingMore.value = false
             _historyInitialLoaded.value = true
             pendingRelayHistoryIds.clear()
+            refreshHistoryCategories()
         }
     }
 
@@ -1621,6 +1752,7 @@ class InputViewModel(application: Application) : AndroidViewModel(application) {
             return
         }
 
+        refreshHistoryCategories()
         val latestItems = latestInputHistoryPage(HISTORY_PAGE_SIZE)
         _visibleHistoryItems.value = latestItems
         _historyInitialLoaded.value = true
@@ -1667,6 +1799,7 @@ class InputViewModel(application: Application) : AndroidViewModel(application) {
     fun reloadHistory() {
         viewModelScope.launch {
             _historyItems.value = historyRepository.loadHistory()
+            refreshHistoryCategories()
         }
     }
 
@@ -1886,7 +2019,8 @@ class InputViewModel(application: Application) : AndroidViewModel(application) {
     private suspend fun addHistoryItem(item: HistoryItem) {
         historyRepository.addHistoryItem(item)
         _historyItems.value = _historyItems.value + item
-        if (InputHistoryScope.isInputRecord(item)) {
+        refreshHistoryCategories()
+        if (InputHistoryScope.isInputRecord(item) && item.isInSelectedCategory()) {
             _visibleHistoryItems.value = _visibleHistoryItems.value + item
             refreshVisibleHistoryHasMore(_visibleHistoryItems.value)
         }
@@ -1902,7 +2036,7 @@ class InputViewModel(application: Application) : AndroidViewModel(application) {
         }
         _visibleHistoryItems.value = _visibleHistoryItems.value.map { item ->
             if (item.id == itemId) transform(item) else item
-        }.filter(InputHistoryScope::isInputRecord)
+        }.filter { item -> InputHistoryScope.isInputRecord(item) && item.isInSelectedCategory() }
     }
 
     private fun replaceHistoryItemInState(updated: HistoryItem) {
@@ -1911,7 +2045,7 @@ class InputViewModel(application: Application) : AndroidViewModel(application) {
         }
         _visibleHistoryItems.value = _visibleHistoryItems.value.map { item ->
             if (item.id == updated.id) updated else item
-        }.filter(InputHistoryScope::isInputRecord)
+        }.filter { item -> InputHistoryScope.isInputRecord(item) && item.isInSelectedCategory() }
     }
 
     private suspend fun refreshVisibleHistoryHasMore(items: List<HistoryItem>) {
@@ -1921,12 +2055,15 @@ class InputViewModel(application: Application) : AndroidViewModel(application) {
 
     private suspend fun latestInputHistoryPage(limit: Int): List<HistoryItem> {
         if (limit <= 0) return emptyList()
-        return InputHistoryScope.filterInputRecords(historyRepository.loadHistory()).takeLast(limit)
+        return InputHistoryScope.filterInputRecords(historyRepository.loadHistory())
+            .filter { it.isInSelectedCategory() }
+            .takeLast(limit)
     }
 
     private suspend fun olderInputHistoryPage(oldestVisibleItem: HistoryItem, limit: Int): List<HistoryItem> {
         if (limit <= 0) return emptyList()
         val inputItems = InputHistoryScope.filterInputRecords(historyRepository.loadHistory())
+            .filter { it.isInSelectedCategory() }
         val boundaryIndex = inputItems.indexOfFirst { item ->
             item.timestamp == oldestVisibleItem.timestamp && item.id == oldestVisibleItem.id
         }
@@ -1955,10 +2092,38 @@ class InputViewModel(application: Application) : AndroidViewModel(application) {
             contentType = contentType,
             syncStatus = syncStatus,
             channel = channel,
+            category = selectedCategoryForNewItem(contentType),
             sourceApp = sourceApp,
             sourcePackage = sourcePackage,
             metadata = metadata
         )
+    }
+
+    private suspend fun refreshHistoryCategories() {
+        _historyCategories.value = historyRepository.loadCategories()
+        if (_selectedHistoryCategory.value !in _historyCategories.value) {
+            _selectedHistoryCategory.value = HistoryRepository.DEFAULT_CATEGORY
+        }
+    }
+
+    private fun selectedCategoryForNewItem(contentType: String): String {
+        return if (contentType == "notification") {
+            HistoryRepository.DEFAULT_CATEGORY
+        } else {
+            normalizeHistoryCategory(_selectedHistoryCategory.value)
+        }
+    }
+
+    private fun HistoryItem.isInSelectedCategory(): Boolean {
+        return normalizeHistoryCategory(category) == _selectedHistoryCategory.value
+    }
+
+    private fun normalizeHistoryCategory(category: String): String {
+        return category.trim().ifBlank { HistoryRepository.DEFAULT_CATEGORY }
+    }
+
+    private fun defaultCategoryFirstComparator(): Comparator<String> {
+        return compareBy<String> { it != HistoryRepository.DEFAULT_CATEGORY }.thenBy { it }
     }
 
     private fun imageHistoryMetadata(payload: ClipboardImagePayload): String {
@@ -1971,11 +2136,102 @@ class InputViewModel(application: Application) : AndroidViewModel(application) {
         }.toString()
     }
 
-    private fun fileHistoryMetadata(payload: ClipboardFilePayload): String {
+    private suspend fun saveScannedFileToPhone(payload: ClipboardFilePayload): String =
+        withContext(Dispatchers.IO) {
+            val bytes = Base64.decode(payload.data, Base64.DEFAULT)
+            require(bytes.isNotEmpty()) { "文件内容为空" }
+
+            val fileName = sanitizeLocalFileName(payload.fileName)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                saveScannedFileToPublicDownloads(payload, fileName, bytes)?.let { savedPath ->
+                    return@withContext savedPath
+                }
+            }
+
+            val app = getApplication<Application>()
+            val directory = app.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS)
+                ?: File(app.filesDir, "scanned_files")
+            if (!directory.exists() && !directory.mkdirs()) {
+                error("无法创建保存目录")
+            }
+            if (!directory.isDirectory) {
+                error("保存目录不可用")
+            }
+
+            val targetFile = uniqueFile(directory, fileName)
+            targetFile.writeBytes(bytes)
+            targetFile.absolutePath
+        }
+
+    private fun saveScannedFileToPublicDownloads(
+        payload: ClipboardFilePayload,
+        fileName: String,
+        bytes: ByteArray
+    ): String? {
+        val app = getApplication<Application>()
+        val resolver = app.contentResolver
+        val relativePath = "${Environment.DIRECTORY_DOWNLOADS}/VoiceInput"
+        val values = ContentValues().apply {
+            put(MediaStore.Downloads.DISPLAY_NAME, fileName)
+            put(MediaStore.Downloads.MIME_TYPE, payload.mimeType.ifBlank { "application/octet-stream" })
+            put(MediaStore.Downloads.RELATIVE_PATH, relativePath)
+            put(MediaStore.Downloads.SIZE, bytes.size)
+            put(MediaStore.Downloads.IS_PENDING, 1)
+        }
+
+        return try {
+            val uri = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
+                ?: return null
+            resolver.openOutputStream(uri)?.use { output ->
+                output.write(bytes)
+                output.flush()
+            } ?: return null
+            val publishedValues = ContentValues().apply {
+                put(MediaStore.Downloads.IS_PENDING, 0)
+            }
+            resolver.update(uri, publishedValues, null, null)
+            "$relativePath/$fileName"
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to save scanned file to public downloads", e)
+            null
+        }
+    }
+
+    private fun uniqueFile(directory: File, fileName: String): File {
+        var candidate = File(directory, fileName)
+        if (!candidate.exists()) {
+            return candidate
+        }
+
+        val dotIndex = fileName.lastIndexOf('.').takeIf { it > 0 } ?: -1
+        val baseName = if (dotIndex > 0) fileName.substring(0, dotIndex) else fileName
+        val extension = if (dotIndex > 0) fileName.substring(dotIndex) else ""
+        var suffix = 1
+        while (true) {
+            candidate = File(directory, "$baseName-$suffix$extension")
+            if (!candidate.exists()) {
+                return candidate
+            }
+            suffix += 1
+        }
+    }
+
+    private fun sanitizeLocalFileName(name: String): String {
+        val sanitized = name
+            .replace(Regex("[\\\\/:*?\"<>|\\u0000-\\u001F]"), "_")
+            .trim()
+            .trim('.')
+        return sanitized.ifBlank { "scanned-file-${System.currentTimeMillis()}" }
+    }
+
+    private fun fileHistoryMetadata(payload: ClipboardFilePayload, savedPath: String? = null): String {
         return JsonObject().apply {
             addProperty("file_name", payload.fileName)
             addProperty("mime_type", payload.mimeType)
             addProperty("size", payload.size)
+            savedPath?.takeIf { it.isNotBlank() }?.let {
+                addProperty("saved_path", it)
+            }
         }.toString()
     }
 

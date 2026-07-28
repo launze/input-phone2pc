@@ -12,8 +12,8 @@ android {
         applicationId = "com.voiceinput"
         minSdk = 24
         targetSdk = 34
-        versionCode = 10
-        versionName = "1.2.8"
+        versionCode = 23
+        versionName = "1.2.21"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
@@ -30,7 +30,10 @@ android {
                     .get()
                     .replace('\\', '/')
                     .trimEnd('/')
-                arguments += listOf("-DOpenCV_DIR=$opencvSdk/sdk/native")
+                arguments += listOf(
+                    "-DOpenCV_DIR=$opencvSdk/sdk/native",
+                    "-DCMAKE_POLICY_VERSION_MINIMUM=3.5"
+                )
             }
         }
     }

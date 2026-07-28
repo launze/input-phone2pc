@@ -16,6 +16,7 @@ data class HistoryItem(
     val isFavorite: Boolean = false,
     val isPinned: Boolean = false,
     val tags: String = "",
+    val category: String = "语音输入",
     val sourceApp: String = "",
     val sourcePackage: String = "",
     val metadata: String = "",

@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>二维码读取</title>
+    <link rel="stylesheet" href="c2-reader.css">
+</head>
+<body>
+    <noscript>二维码读取栏需要启用脚本。</noscript>
+    <main class="reader-panel">
+        <header class="panel-head">
+            <button id="close-reader-btn" class="icon-btn" type="button" title="关闭">×</button>
+        </header>
+
+        <section class="status-block" aria-label="二维码读取控制">
+            <button id="reader-toggle-btn" class="progress-ring" type="button" title="开始截图">
+                <span id="reader-progress">0%</span>
+            </button>
+        </section>
+
+        <section class="action-column" hidden>
+            <button id="start-reader-btn" class="primary-action" type="button">开始截图</button>
+            <button id="stop-reader-btn" class="secondary-action" type="button">停止</button>
+            <button id="open-output-btn" class="secondary-action" type="button">打开保存目录</button>
+        </section>
+
+        <footer class="panel-foot" hidden>
+            <p id="reader-summary">未开始</p>
+            <strong id="reader-state">待机</strong>
+            <strong id="reader-frames">0</strong>
+            <strong id="reader-backlog">0</strong>
+            <strong id="reader-files">0</strong>
+            <div id="reader-output" class="path-text"></div>
+            <div id="reader-message" class="message-text"></div>
+        </footer>
+    </main>
+    <script>
+        window.addEventListener('error', function (event) {
+            var target = document.getElementById('reader-message');
+            if (target) {
+                target.textContent = '读取栏初始化失败：' + (event.message || '未知错误');
+                target.className = 'message-text error';
+            } else {
+                document.body.textContent = '读取栏初始化失败：' + (event.message || '未知错误');
+            }
+        });
+        window.addEventListener('unhandledrejection', function (event) {
+            var target = document.getElementById('reader-message');
+            var reason = event.reason;
+            var message = typeof reason === 'string' ? reason : (reason && reason.message) || '未知错误';
+            if (target) {
+                target.textContent = '读取栏调用失败：' + message;
+                target.className = 'message-text error';
+            }
+        });
+    </script>
+    <script type="module" src="c2-reader.js"></script>
+</body>
+</html>

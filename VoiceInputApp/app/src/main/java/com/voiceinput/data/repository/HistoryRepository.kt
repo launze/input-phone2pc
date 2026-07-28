@@ -19,7 +19,9 @@ class HistoryRepository(context: Context) {
     private val gson = Gson()
 
     companion object {
+        const val DEFAULT_CATEGORY = "语音输入"
         private const val KEY_HISTORY_ITEMS = "history_items"
+        private const val KEY_HISTORY_CATEGORIES = "history_categories"
         private const val MAX_HISTORY_SIZE = 1000
     }
 
@@ -35,6 +37,15 @@ class HistoryRepository(context: Context) {
 
     suspend fun loadHistory(): List<HistoryItem> = withContext(Dispatchers.IO) {
         readHistoryItems()
+    }
+
+    suspend fun loadCategories(): List<String> = withContext(Dispatchers.IO) {
+        readCategories()
+    }
+
+    suspend fun saveCategories(categories: List<String>) = withContext(Dispatchers.IO) {
+        val normalized = normalizeCategories(categories)
+        prefs.edit().putString(KEY_HISTORY_CATEGORIES, gson.toJson(normalized)).apply()
     }
 
     suspend fun loadRecentHistoryPage(limit: Int): List<HistoryItem> = withContext(Dispatchers.IO) {
@@ -173,6 +184,43 @@ class HistoryRepository(context: Context) {
         prefs.edit().remove(KEY_HISTORY_ITEMS).apply()
     }
 
+    suspend fun renameCategory(oldName: String, newName: String): List<String> = withContext(Dispatchers.IO) {
+        val oldCategory = normalizeCategory(oldName)
+        val newCategory = normalizeCategory(newName)
+        if (oldCategory == DEFAULT_CATEGORY || newCategory.isBlank()) {
+            return@withContext readCategories()
+        }
+
+        val updatedCategories = normalizeCategories(
+            readCategories().map { if (it == oldCategory) newCategory else it }
+        )
+        val updatedItems = readHistoryItems().map { item ->
+            if (item.normalizedCategory() == oldCategory) item.copy(category = newCategory) else item
+        }
+        prefs.edit()
+            .putString(KEY_HISTORY_CATEGORIES, gson.toJson(updatedCategories))
+            .putString(KEY_HISTORY_ITEMS, gson.toJson(updatedItems))
+            .apply()
+        updatedCategories
+    }
+
+    suspend fun deleteCategory(category: String): List<String> = withContext(Dispatchers.IO) {
+        val normalized = normalizeCategory(category)
+        if (normalized == DEFAULT_CATEGORY) {
+            return@withContext readCategories()
+        }
+
+        val updatedCategories = normalizeCategories(readCategories().filterNot { it == normalized })
+        val updatedItems = readHistoryItems().map { item ->
+            if (item.normalizedCategory() == normalized) item.copy(category = DEFAULT_CATEGORY) else item
+        }
+        prefs.edit()
+            .putString(KEY_HISTORY_CATEGORIES, gson.toJson(updatedCategories))
+            .putString(KEY_HISTORY_ITEMS, gson.toJson(updatedItems))
+            .apply()
+        updatedCategories
+    }
+
     suspend fun searchHistory(query: String): List<HistoryItem> = withContext(Dispatchers.IO) {
         val allHistory = readHistoryItems()
         if (query.isBlank()) return@withContext allHistory
@@ -209,10 +257,46 @@ class HistoryRepository(context: Context) {
             isFavorite = getBoolean("isFavorite"),
             isPinned = getBoolean("isPinned"),
             tags = getString("tags"),
+            category = normalizeCategory(getString("category")),
             sourceApp = getString("sourceApp"),
             sourcePackage = getString("sourcePackage"),
             metadata = getString("metadata"),
         )
+    }
+
+    private fun readCategories(): List<String> {
+        val saved = prefs.getString(KEY_HISTORY_CATEGORIES, null)
+        val parsed = if (saved.isNullOrBlank()) {
+            emptyList()
+        } else {
+            try {
+                JsonParser.parseString(saved).asJsonArray
+                    .mapNotNull { element -> element.takeIf { it.isJsonPrimitive }?.asString }
+            } catch (_: Exception) {
+                emptyList()
+            }
+        }
+        val historyCategories = readHistoryItems().map { it.normalizedCategory() }
+        return normalizeCategories(parsed + historyCategories)
+    }
+
+    private fun normalizeCategories(categories: List<String>): List<String> {
+        val result = mutableListOf(DEFAULT_CATEGORY)
+        categories
+            .map(::normalizeCategory)
+            .filter { it.isNotBlank() && it != DEFAULT_CATEGORY }
+            .distinct()
+            .sorted()
+            .forEach(result::add)
+        return result
+    }
+
+    private fun normalizeCategory(category: String): String {
+        return category.trim().ifBlank { DEFAULT_CATEGORY }
+    }
+
+    private fun HistoryItem.normalizedCategory(): String {
+        return normalizeCategory(category)
     }
 
     private fun JsonObject.getString(name: String): String {

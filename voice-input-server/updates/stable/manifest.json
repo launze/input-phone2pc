@@ -1,8 +1,384 @@
 {
   "channel": "stable",
-  "latest_version": "1.2.8",
+  "latest_version": "1.2.21",
   "minimum_supported_version": "0.0.1",
   "releases": [
+    {
+      "version": "1.2.21",
+      "release_notes": "修复 PC AI 助手按日期生成报告时，模型返回 YYYY-MM-DD 导致工具规划参数类型错误的问题；日期区间会按本地时区自动转换为完整的起止时间。",
+      "published_at": "2026-07-28T19:28:55+08:00",
+      "force_update": false,
+      "assets": [
+        {
+          "platform": "android",
+          "arch": "universal",
+          "file_name": "voiceinput-android-v1.2.21.apk",
+          "sha256": "677428a5174a083f87a43507c1f196c89ecb9a4b442e1d9407a3c8a499bb56e4",
+          "size": 33435391,
+          "mime_type": "application/vnd.android.package-archive"
+        },
+        {
+          "platform": "windows",
+          "arch": "x64",
+          "file_name": "voiceinput-desktop-windows-x64-v1.2.21-setup.exe",
+          "sha256": "d700e7c4ecffc7451e64e5d99f5649f53c4b9bf557508f670298c55ba62f9fa4",
+          "size": 8355757,
+          "mime_type": "application/vnd.microsoft.portable-executable"
+        },
+        {
+          "platform": "windows",
+          "arch": "x64",
+          "file_name": "voiceinput-desktop-windows-x64-v1.2.21.msi",
+          "sha256": "1ad6fc40c64198be36c4db2a0ddd3903c01de928eefd8501b24887458e6aeefc",
+          "size": 12029952,
+          "mime_type": "application/x-msi"
+        }
+      ]
+    },
+    {
+      "version": "1.2.20",
+      "release_notes": "优化 PC AI 助手：会话支持重命名和删除，三栏内容限制在窗口内独立滚动，生成失败详情可复制；同步 Android 目录界面和二维码读取改进。",
+      "published_at": "2026-07-28T18:55:33+08:00",
+      "force_update": false,
+      "assets": [
+        {
+          "platform": "android",
+          "arch": "universal",
+          "file_name": "voiceinput-android-v1.2.20.apk",
+          "sha256": "750fca42f8addfd825973d1df3a0475caf0343081b3cb265ca6ba5a8133ffe1e",
+          "size": 33435391,
+          "mime_type": "application/vnd.android.package-archive"
+        },
+        {
+          "platform": "windows",
+          "arch": "x64",
+          "file_name": "voiceinput-desktop-windows-x64-v1.2.20-setup.exe",
+          "sha256": "968a556c85fcc1c7373969cafb0d73d92c2628b8163cb0cc529923e99e6df76e",
+          "size": 8339760,
+          "mime_type": "application/vnd.microsoft.portable-executable"
+        },
+        {
+          "platform": "windows",
+          "arch": "x64",
+          "file_name": "voiceinput-desktop-windows-x64-v1.2.20.msi",
+          "sha256": "3ec186aaffae688b3a48107c93a209252da2cc56ee890a25d126c8b7c1bff6f8",
+          "size": 12021760,
+          "mime_type": "application/x-msi"
+        }
+      ]
+    },
+    {
+      "version": "1.2.19",
+      "release_notes": "Adjust Android category UI: history cards show category beside the delivery status with smaller controls, and the input category selector uses a longer field with category actions moved into the more menu.",
+      "published_at": "2026-07-03T13:54:24+08:00",
+      "force_update": false,
+      "assets": [
+        {
+          "platform": "android",
+          "arch": "universal",
+          "file_name": "voiceinput-android-v1.2.19.apk",
+          "sha256": "3883a55b9c4efc064d3f90f25a02509bda31277c44f592875085300cd705950c",
+          "size": 33435395,
+          "mime_type": "application/vnd.android.package-archive"
+        },
+        {
+          "platform": "windows",
+          "arch": "x64",
+          "file_name": "voiceinput-desktop-windows-x64-v1.2.19-setup.exe",
+          "sha256": "251f51e10420b62b69ae519ccdeadbb402fed1bc255107f877f6be0a046c992a",
+          "size": 8348437,
+          "mime_type": "application/vnd.microsoft.portable-executable"
+        },
+        {
+          "platform": "windows",
+          "arch": "x64",
+          "file_name": "voiceinput-desktop-windows-x64-v1.2.19.msi",
+          "sha256": "7977e8ff1baa49c55c6aeb43fb29745d726412d482e1a888a466cdd9f7ea405c",
+          "size": 12013568,
+          "mime_type": "application/x-msi"
+        }
+      ]
+    },
+    {
+      "version": "1.2.18",
+      "release_notes": "Add history categories on Android and Windows: create, select, rename, and delete categories; default category is Voice Input. New records use the selected category, and history list, export, and AI history filters support category filtering.",
+      "published_at": "2026-06-29T15:15:50+08:00",
+      "force_update": false,
+      "assets": [
+        {
+          "platform": "android",
+          "arch": "universal",
+          "file_name": "voiceinput-android-v1.2.18.apk",
+          "sha256": "f05a315c683b0a810eff86b20a698418df09a0806b19d9df3f5ac308332008bf",
+          "size": 33435395,
+          "mime_type": "application/vnd.android.package-archive"
+        },
+        {
+          "platform": "windows",
+          "arch": "x64",
+          "file_name": "voiceinput-desktop-windows-x64-v1.2.18-setup.exe",
+          "sha256": "4e071c2111220c0ea200de450aee00d781c9f13cb3129d181c77db708ff29f6e",
+          "size": 8349754,
+          "mime_type": "application/vnd.microsoft.portable-executable"
+        },
+        {
+          "platform": "windows",
+          "arch": "x64",
+          "file_name": "voiceinput-desktop-windows-x64-v1.2.18.msi",
+          "sha256": "c3adf06cde0e4bc68f954e7c841f0560fa24302e4ef295eecf3dd25fa9a44ac7",
+          "size": 12013568,
+          "mime_type": "application/x-msi"
+        }
+      ]
+    },
+    {
+      "version": "1.2.17",
+      "release_notes": "手机端重新编译发布 1.2.17，包含扫码传文件未配对可直接保存到手机、已配对但 PC 离线时保存到手机等当前手机端改动。",
+      "published_at": "2026-06-23T21:19:05+08:00",
+      "force_update": false,
+      "assets": [
+        {
+          "platform": "android",
+          "arch": "universal",
+          "file_name": "voiceinput-android-v1.2.17.apk",
+          "sha256": "bedd14587627de5b2fcf8902fbd1ce6ad60db5577b066b53c5fb0b2dda81ac1e",
+          "size": 33423107,
+          "mime_type": "application/vnd.android.package-archive"
+        }
+      ]
+    },
+    {
+      "version": "1.2.16",
+      "release_notes": "手机端扫码传文件支持未配对直接扫码保存到手机；已配对但 PC 离线时也保存到手机。更新 PC Windows x64/x86 桌面安装包；新增 QR GUI Windows x64/x86 与 Kylin V10/glibc 2.31 构建的 Linux amd64/arm64 便携包，打包 wxWidgets/OpenCV 等运行库以兼容 Ubuntu 20 时代系统。",
+      "published_at": "2026-06-23T20:13:45+08:00",
+      "force_update": false,
+      "assets": [
+        {
+          "platform": "android",
+          "arch": "universal",
+          "file_name": "voiceinput-android-v1.2.16.apk",
+          "sha256": "124520cc16322afa5d309b3ef5d57f151df5729d540ff9fd37aa715468e9e940",
+          "size": 33406654,
+          "mime_type": "application/vnd.android.package-archive"
+        },
+        {
+          "platform": "windows",
+          "arch": "x64",
+          "file_name": "voiceinput-desktop-windows-x64-v1.2.16-setup.exe",
+          "sha256": "1ecc6d1031b8f19bff0c21d391bed432e9366f34f46f297ccf4a63d6ddd0b3f7",
+          "size": 8318676,
+          "mime_type": "application/vnd.microsoft.portable-executable"
+        },
+        {
+          "platform": "windows",
+          "arch": "x64",
+          "file_name": "voiceinput-desktop-windows-x64-v1.2.16.msi",
+          "sha256": "3ae579d65cfb9959135185bd49b824a942cc62d4bf8c0a601c61980b51a26dd5",
+          "size": 11972608,
+          "mime_type": "application/x-msi"
+        },
+        {
+          "platform": "windows",
+          "arch": "x86",
+          "file_name": "voiceinput-desktop-windows-x86-v1.2.16-setup.exe",
+          "sha256": "1f0182b720a916aae797c8e8744fac9857dcbad85930c7f32a5096ba6bb7da5c",
+          "size": 7269144,
+          "mime_type": "application/vnd.microsoft.portable-executable"
+        },
+        {
+          "platform": "windows",
+          "arch": "x86",
+          "file_name": "voiceinput-desktop-windows-x86-v1.2.16.msi",
+          "sha256": "9867a4d37ee353b9e8b14de37094a59fda3f59ff627674cfc4bf63bcd027d80b",
+          "size": 10227712,
+          "mime_type": "application/x-msi"
+        },
+        {
+          "platform": "file-qr-gui",
+          "arch": "windows-x64",
+          "file_name": "voiceinput-file-qr-gui-windows-x64-v1.2.16.zip",
+          "sha256": "67f276179448819b25fe55d659ddd78a92c9389cb93296bf00408d552c0fa277",
+          "size": 2708272,
+          "mime_type": "application/zip"
+        },
+        {
+          "platform": "file-qr-gui",
+          "arch": "windows-x86",
+          "file_name": "voiceinput-file-qr-gui-windows-x86-v1.2.16.zip",
+          "sha256": "741729404654e350b12da1b14141616ccdd51250ca62806e0e0d23b795193b58",
+          "size": 2360230,
+          "mime_type": "application/zip"
+        },
+        {
+          "platform": "file-qr-gui",
+          "arch": "linux-amd64",
+          "file_name": "voiceinput-file-qr-gui-linux-amd64-v1.2.16.tar.gz",
+          "sha256": "0c0e17496e59c5ddd713947ca5fa874b8109c7081b73cd8d82ee493e415744ae",
+          "size": 20081350,
+          "mime_type": "application/gzip"
+        },
+        {
+          "platform": "file-qr-gui",
+          "arch": "linux-arm64",
+          "file_name": "voiceinput-file-qr-gui-linux-arm64-v1.2.16.tar.gz",
+          "sha256": "859f68475956b99e9c0d270c1ed9f58f03603d66093ede7ac47507325f6e794b",
+          "size": 18454650,
+          "mime_type": "application/gzip"
+        }
+      ]
+    },
+    {
+      "version": "1.2.15",
+      "release_notes": "手机端扫码传文件左侧进度信息调整：圆环内保留百分比，圆环下方改为显示实时速度 KB/s；已接收大小和估算总大小继续显示在速度下方，状态文案不再重复百分比。",
+      "published_at": "2026-06-15T14:16:51+08:00",
+      "force_update": false,
+      "assets": [
+        {
+          "platform": "android",
+          "arch": "universal",
+          "file_name": "voiceinput-android-v1.2.15.apk",
+          "sha256": "af7456ec997e04db36faad4673cb0b37d50de94dda73627dbf2e175a5fe7da1f",
+          "size": 33402558,
+          "mime_type": "application/vnd.android.package-archive"
+        }
+      ]
+    },
+    {
+      "version": "1.2.14",
+      "release_notes": "手机端扫码传文件继续沿用参考项目默认相机参数（Camera2、60帧、1/200、ISO200、全扫），并移除相机画面上的 native 四角引导线和黑色描边，让中间扫码区域保持纯摄像头预览，避免角内变暗。",
+      "published_at": "2026-06-15T13:02:14+08:00",
+      "force_update": false,
+      "assets": [
+        {
+          "platform": "android",
+          "arch": "universal",
+          "file_name": "voiceinput-android-v1.2.14.apk",
+          "sha256": "9a61c8568526140f17b4f470961c419fef524297a4ae71524db7ca9a22f78502",
+          "size": 33402474,
+          "mime_type": "application/vnd.android.package-archive"
+        }
+      ]
+    },
+    {
+      "version": "1.2.13",
+      "release_notes": "手机端扫码传文件页面改为左右侧边仪表盘：左侧显示圆环进度、百分比和已接收/估算总大小；右侧显示速率、扫描/解码、定位、模式和相机调试信息，并加入帧率、快门、ISO、定位复用、诊断和重置参数按钮。中间区域保留纯摄像头画面。",
+      "published_at": "2026-06-15T12:55:11+08:00",
+      "force_update": false,
+      "assets": [
+        {
+          "platform": "android",
+          "arch": "universal",
+          "file_name": "voiceinput-android-v1.2.13.apk",
+          "sha256": "1260d5b3f449277c97ccd068131375947e948337b17711bd031c6e5138e9a51a",
+          "size": 33406574,
+          "mime_type": "application/vnd.android.package-archive"
+        }
+      ]
+    },
+    {
+      "version": "1.2.12",
+      "release_notes": "手机端扫码传文件页面优化横屏信息栏：进度和速率统计改为左右布局，减少遮挡摄像头画面；进度、速率、画面、相机、扫描提示改为中文。",
+      "published_at": "2026-06-15T12:43:56+08:00",
+      "force_update": false,
+      "assets": [
+        {
+          "platform": "android",
+          "arch": "universal",
+          "file_name": "voiceinput-android-v1.2.12.apk",
+          "sha256": "399ee517e5c3cce4764e9285847ce886106310890a1c489f000541d3aee98f9c",
+          "size": 33393410,
+          "mime_type": "application/vnd.android.package-archive"
+        }
+      ]
+    },
+    {
+      "version": "1.2.11",
+      "release_notes": "手机端扫码传文件页面打开后直接横屏，和文件二维码扫码场景保持一致。",
+      "published_at": "2026-06-15T12:35:03+08:00",
+      "force_update": false,
+      "assets": [
+        {
+          "platform": "android",
+          "arch": "universal",
+          "file_name": "voiceinput-android-v1.2.11.apk",
+          "sha256": "e6e1dba25aa2c8f28b109073cda7aea6d79cda48333119702f7331c1e8bd9229",
+          "size": 33393394,
+          "mime_type": "application/vnd.android.package-archive"
+        }
+      ]
+    },
+    {
+      "version": "1.2.10",
+      "release_notes": "手机端修复设置页顶部空白，优化设置设备页按钮排版；历史记录和通知记录页默认折叠筛选与操作区，让列表优先显示。保留 PC 首次配对自动连接服务器中转、二维码模式切换和扫码解码优化。",
+      "published_at": "2026-06-15T10:45:13+08:00",
+      "force_update": false,
+      "assets": [
+        {
+          "platform": "android",
+          "arch": "universal",
+          "file_name": "voiceinput-android-v1.2.10.apk",
+          "sha256": "7a158d46b61b5df25ac5a6a32ab1a744bc5cedbf251020426a691d1bbd4eff71",
+          "size": 33393394,
+          "mime_type": "application/vnd.android.package-archive"
+        },
+        {
+          "platform": "windows",
+          "arch": "x64",
+          "file_name": "voiceinput-desktop-windows-x64-v1.2.10-setup.exe",
+          "sha256": "f9e7756bb3d94ff153c8bb85da551319b7fc8ec7daf92261a45a367a25d0277e",
+          "size": 6291212,
+          "mime_type": "application/vnd.microsoft.portable-executable"
+        },
+        {
+          "platform": "windows",
+          "arch": "x64",
+          "file_name": "voiceinput-desktop-windows-x64-v1.2.10.msi",
+          "sha256": "e3a29d6835b88d9fee3f0ae7d7962df2901ec64ca206281759800a7109e166f9",
+          "size": 9297920,
+          "mime_type": "application/x-msi"
+        },
+        {
+          "platform": "tool",
+          "arch": "universal",
+          "file_name": "voiceinput-file-qr-generator-v1.2.10.zip",
+          "sha256": "fd76a99b237c13a8bf554c4be448a91c87dec73c90ea1872b0dce9c292032e07",
+          "size": 664000,
+          "mime_type": "application/zip"
+        }
+      ]
+    },
+    {
+      "version": "1.2.9",
+      "release_notes": "PC 端首次配对自动连接服务器中转，二维码默认使用服务器中转扫码并可切换局域网扫码配置；手机端扫码按二维码模式选择中转或局域网连接；文件二维码扫码解码默认使用 Camera2 和 C2 参数。",
+      "published_at": "2026-06-15T10:10:38+08:00",
+      "force_update": false,
+      "assets": [
+        {
+          "platform": "android",
+          "arch": "universal",
+          "file_name": "voiceinput-android-v1.2.9.apk",
+          "sha256": "912999848d8a27bb39403908111e9476108422bad645d962190d4fd4f0ceb477",
+          "size": 33389294,
+          "mime_type": "application/vnd.android.package-archive"
+        },
+        {
+          "platform": "windows",
+          "arch": "x64",
+          "file_name": "voiceinput-desktop-windows-x64-v1.2.9-setup.exe",
+          "sha256": "602465e2ab6e8e961d34a3832777e37702608b3c09af00b19fae6616f55e54f1",
+          "size": 6290946,
+          "mime_type": "application/vnd.microsoft.portable-executable"
+        },
+        {
+          "platform": "windows",
+          "arch": "x64",
+          "file_name": "voiceinput-desktop-windows-x64-v1.2.9.msi",
+          "sha256": "7f358a3796ca4591245eaea15da771816b42a769599cd54a6958879abcfb3845",
+          "size": 9302016,
+          "mime_type": "application/x-msi"
+        }
+      ]
+    },
     {
       "version": "1.2.8",
       "release_notes": "PC 端 AI 助手右侧增加工具调用、引用记录、导出文件 Tab；会话列表精简为名称和时间并加宽；移除底部历史加载区域。",

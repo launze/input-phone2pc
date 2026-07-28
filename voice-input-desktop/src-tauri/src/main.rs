@@ -3,6 +3,7 @@
     windows_subsystem = "windows"
 )]
 
+mod c2_reader;
 mod crypto;
 mod input;
 mod network;
@@ -12,6 +13,7 @@ mod update;
 
 use std::sync::Arc;
 use std::{fs, path::PathBuf};
+use chrono::TimeZone;
 use storage::ai::{AiExportedFile, AiMessage, AiSession, AiSkill, AiToolCall};
 use storage::config::{AppConfig, OpenAiConfig};
 use storage::history::{self, HistoryPage, HistoryQuery, HistoryRecord, NewHistoryRecord};
@@ -166,6 +168,7 @@ struct AiAssistantFilters {
     favorite: Option<bool>,
     pinned: Option<bool>,
     tag: Option<String>,
+    category: Option<String>,
     limit: Option<usize>,
 }
 
@@ -203,7 +206,9 @@ struct AiAssistantToolArguments {
     format: Option<String>,
     selected_skill: Option<String>,
     source_filters: Option<serde_json::Value>,
+    #[serde(default, deserialize_with = "deserialize_ai_start_at")]
     start_at: Option<i64>,
+    #[serde(default, deserialize_with = "deserialize_ai_end_at")]
     end_at: Option<i64>,
     search: Option<String>,
     content_type: Option<String>,
@@ -214,7 +219,79 @@ struct AiAssistantToolArguments {
     favorite: Option<bool>,
     pinned: Option<bool>,
     tag: Option<String>,
+    category: Option<String>,
     limit: Option<usize>,
+}
+
+#[derive(Debug, serde::Deserialize)]
+#[serde(untagged)]
+enum AiTimestampInput {
+    Milliseconds(i64),
+    Text(String),
+}
+
+fn deserialize_ai_start_at<'de, D>(deserializer: D) -> Result<Option<i64>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    deserialize_ai_timestamp(deserializer, false)
+}
+
+fn deserialize_ai_end_at<'de, D>(deserializer: D) -> Result<Option<i64>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    deserialize_ai_timestamp(deserializer, true)
+}
+
+fn deserialize_ai_timestamp<'de, D>(
+    deserializer: D,
+    end_of_day: bool,
+) -> Result<Option<i64>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let input = <Option<AiTimestampInput> as serde::Deserialize>::deserialize(deserializer)?;
+    input
+        .map(|value| match value {
+            AiTimestampInput::Milliseconds(timestamp) => Ok(timestamp),
+            AiTimestampInput::Text(value) => parse_ai_timestamp_text(&value, end_of_day),
+        })
+        .transpose()
+        .map_err(serde::de::Error::custom)
+}
+
+fn parse_ai_timestamp_text(value: &str, end_of_day: bool) -> Result<i64, String> {
+    let value = value.trim();
+    if let Ok(timestamp) = value.parse::<i64>() {
+        return Ok(timestamp);
+    }
+    if let Ok(timestamp) = chrono::DateTime::parse_from_rfc3339(value) {
+        return Ok(timestamp.timestamp_millis());
+    }
+
+    let date = chrono::NaiveDate::parse_from_str(value, "%Y-%m-%d").map_err(|_| {
+        format!("时间参数必须是 Unix 毫秒时间戳、YYYY-MM-DD 或 RFC3339，收到: {value}")
+    })?;
+    let local_time = if end_of_day {
+        date.and_hms_milli_opt(23, 59, 59, 999)
+    } else {
+        date.and_hms_milli_opt(0, 0, 0, 0)
+    }
+    .ok_or_else(|| format!("无法解析日期: {value}"))?;
+
+    match chrono::Local.from_local_datetime(&local_time) {
+        chrono::LocalResult::Single(timestamp) => Ok(timestamp.timestamp_millis()),
+        chrono::LocalResult::Ambiguous(first, second) => {
+            let timestamp = if end_of_day {
+                first.max(second)
+            } else {
+                first.min(second)
+            };
+            Ok(timestamp.timestamp_millis())
+        }
+        chrono::LocalResult::None => Err(format!("日期在当前时区不存在: {value}")),
+    }
 }
 
 struct AiToolExecutionState {
@@ -274,6 +351,7 @@ fn get_message_history(
     favorite: Option<bool>,
     pinned: Option<bool>,
     tag: Option<String>,
+    category: Option<String>,
 ) -> Result<Vec<HistoryRecord>, String> {
     history::list_records(HistoryQuery {
         ids: None,
@@ -291,6 +369,7 @@ fn get_message_history(
         favorite,
         pinned,
         tag,
+        category,
     })
     .map_err(|e| e.to_string())
 }
@@ -311,6 +390,7 @@ fn get_message_history_page(
     favorite: Option<bool>,
     pinned: Option<bool>,
     tag: Option<String>,
+    category: Option<String>,
 ) -> Result<HistoryPage, String> {
     history::list_record_page(HistoryQuery {
         ids: None,
@@ -328,6 +408,7 @@ fn get_message_history_page(
         favorite,
         pinned,
         tag,
+        category,
     })
     .map_err(|e| e.to_string())
 }
@@ -350,6 +431,7 @@ fn delete_message_history_records(
     favorite: Option<bool>,
     pinned: Option<bool>,
     tag: Option<String>,
+    category: Option<String>,
 ) -> Result<usize, String> {
     history::delete_records(HistoryQuery {
         ids: None,
@@ -367,12 +449,13 @@ fn delete_message_history_records(
         favorite,
         pinned,
         tag,
+        category,
     })
     .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-fn create_desktop_text_record(content: String) -> Result<HistoryRecord, String> {
+fn create_desktop_text_record(content: String, category: Option<String>) -> Result<HistoryRecord, String> {
     let normalized = content.trim();
     if normalized.is_empty() {
         return Err("文字内容不能为空".to_string());
@@ -391,6 +474,7 @@ fn create_desktop_text_record(content: String) -> Result<HistoryRecord, String> 
         via: "desktop".to_string(),
         delivery_mode: "manual".to_string(),
         metadata: None,
+        category,
     };
 
     history::record_message(record)
@@ -436,6 +520,26 @@ fn set_message_history_pinned_by_ids(ids: Vec<String>, pinned: bool) -> Result<u
 #[tauri::command]
 fn set_message_history_tags(id: String, tags: String) -> Result<HistoryRecord, String> {
     history::set_record_tags(&id, &tags).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn list_history_categories() -> Result<Vec<String>, String> {
+    history::list_categories().map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn add_history_category(category: String) -> Result<Vec<String>, String> {
+    history::add_category(&category).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn rename_history_category(old_name: String, new_name: String) -> Result<Vec<String>, String> {
+    history::rename_category(&old_name, &new_name).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn delete_history_category(category: String) -> Result<Vec<String>, String> {
+    history::delete_category(&category).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -562,6 +666,52 @@ fn open_parent_folder(path: String) -> Result<(), String> {
 }
 
 #[tauri::command]
+async fn open_c2_screen_reader(app_handle: tauri::AppHandle) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || c2_reader::open_panel(app_handle))
+        .await
+        .map_err(|error| format!("打开二维码读取窗口线程失败: {}", error))?
+}
+
+#[tauri::command]
+async fn close_c2_screen_reader(app_handle: tauri::AppHandle) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || c2_reader::close_panel(app_handle))
+        .await
+        .map_err(|error| format!("关闭二维码读取窗口线程失败: {}", error))?
+}
+
+#[tauri::command]
+async fn start_c2_screen_reader(
+    app_handle: tauri::AppHandle,
+) -> Result<c2_reader::C2ReaderStatus, String> {
+    tauri::async_runtime::spawn_blocking(move || c2_reader::start(app_handle))
+        .await
+        .map_err(|error| format!("启动二维码读取线程失败: {}", error))?
+}
+
+#[tauri::command]
+async fn stop_c2_screen_reader(
+    app_handle: tauri::AppHandle,
+) -> Result<c2_reader::C2ReaderStatus, String> {
+    tauri::async_runtime::spawn_blocking(move || c2_reader::stop(app_handle))
+        .await
+        .map_err(|error| format!("停止二维码读取线程失败: {}", error))?
+}
+
+#[tauri::command]
+async fn get_c2_screen_reader_status(
+    app_handle: tauri::AppHandle,
+) -> Result<c2_reader::C2ReaderStatus, String> {
+    tauri::async_runtime::spawn_blocking(move || c2_reader::status(app_handle))
+        .await
+        .map_err(|error| format!("读取二维码状态线程失败: {}", error))?
+}
+
+#[tauri::command]
+fn debug_c2_reader_log(message: String) {
+    println!("[c2-reader:web] {}", message);
+}
+
+#[tauri::command]
 fn save_history_image_as(id: String) -> Result<String, String> {
     use base64::Engine;
 
@@ -630,6 +780,7 @@ fn export_message_history(
     favorite: Option<bool>,
     pinned: Option<bool>,
     tag: Option<String>,
+    category: Option<String>,
 ) -> Result<HistoryExportPayload, String> {
     let query = HistoryQuery {
         ids,
@@ -647,6 +798,7 @@ fn export_message_history(
         favorite,
         pinned,
         tag,
+        category,
     };
     let format = format
         .as_deref()
@@ -1122,6 +1274,16 @@ fn list_ai_sessions(limit: Option<usize>) -> Result<Vec<AiSession>, String> {
 }
 
 #[tauri::command]
+fn rename_ai_session(session_id: String, title: String) -> Result<AiSession, String> {
+    storage::ai::rename_session(&session_id, title).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn delete_ai_session(session_id: String) -> Result<(), String> {
+    storage::ai::delete_session(&session_id).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 fn add_ai_message(
     session_id: String,
     role: String,
@@ -1180,6 +1342,7 @@ fn search_history_records_tool(
     favorite: Option<bool>,
     pinned: Option<bool>,
     tag: Option<String>,
+    category: Option<String>,
 ) -> Result<Vec<HistoryRecord>, String> {
     history::list_records(HistoryQuery {
         ids: None,
@@ -1197,6 +1360,7 @@ fn search_history_records_tool(
         favorite,
         pinned,
         tag,
+        category,
     })
     .map_err(|e| e.to_string())
 }
@@ -1537,6 +1701,7 @@ fn history_query_from_tool_args(arguments: AiAssistantToolArguments) -> HistoryQ
         favorite: arguments.favorite,
         pinned: arguments.pinned,
         tag: arguments.tag,
+        category: arguments.category,
     }
 }
 
@@ -2196,6 +2361,7 @@ fn query_tool_arguments_to_json(arguments: &AiAssistantToolArguments) -> serde_j
         "favorite": arguments.favorite,
         "pinned": arguments.pinned,
         "tag": arguments.tag,
+        "category": arguments.category,
         "limit": arguments.limit,
     })
 }
@@ -2219,6 +2385,7 @@ fn query_to_json(query: &HistoryQuery) -> serde_json::Value {
         "favorite": query.favorite,
         "pinned": query.pinned,
         "tag": query.tag,
+        "category": query.category,
     })
 }
 
@@ -2260,7 +2427,7 @@ fn build_ai_assistant_plan_prompt(
         .unwrap_or_else(|| "null".to_string());
 
     format!(
-        "用户问题：\n{question}\n\n会话上下文：\n{}\n\n可用 Skills：\n{}\n\n可用工具：\n1. search_history_records(arguments): 查询历史输入、图片、文件、通知。arguments 可包含 start_at, end_at, search, content_type, via, from_device, source_app, delivery_status, favorite, pinned, tag, limit。delivery_status 可为 received/manual/offline_sync，favorite/pinned 为 true/false，tag 为标签关键词。\n2. search_notification_records(arguments): 只查询通知记录。arguments 可包含 start_at, end_at, search, source_app, via, from_device, delivery_status, favorite, pinned, tag, limit。favorite/pinned 为 true/false，tag 为标签关键词。\n3. list_notification_apps(arguments): 列出已有通知记录的 App。arguments 可为空。\n4. get_record_detail(arguments): 获取某条记录详情。arguments 必须包含 record_id。\n5. summarize_records(arguments): 对已查询到的记录做摘要。arguments 可包含 record_ids；为空时摘要当前工具查询结果。\n6. export_answer_word(arguments): 将本次最终答案导出 Word。arguments 可包含 title, format，format 只能是 word。\n7. save_ai_session(arguments): 显式保存当前会话。arguments 可包含 title、selected_skill、source_filters。selected_skill 必须是可用 Skills 中的 id；source_filters 必须是 JSON 对象。\n\n当前界面筛选，仅作为参考，是否采用由你决定：\n{ui_filters_text}\n如果当前界面筛选包含 record_ids，它们是 PC 可查询记录 ID；你可以逐个用 get_record_detail 查询，或在已查询记录后传给 summarize_records。\n\n请自主选择 Skill 和一个或多个工具。必须只返回严格 JSON，格式如下：\n{{\"skill_id\":\"weekly_report\",\"final_answer_ready\":false,\"tools\":[{{\"name\":\"search_history_records\",\"arguments\":{{\"content_type\":\"text\",\"limit\":80}}}}]}}\n如果不需要 Skill，skill_id 为 null。至少选择一个工具。不要输出 Markdown，不要输出代码块。",
+        "用户问题：\n{question}\n\n会话上下文：\n{}\n\n可用 Skills：\n{}\n\n可用工具：\n1. search_history_records(arguments): 查询历史输入、图片、文件、通知。arguments 可包含 start_at, end_at, search, content_type, via, from_device, source_app, delivery_status, favorite, pinned, tag, limit。start_at/end_at 必须是 Unix 毫秒时间戳整数；delivery_status 可为 received/manual/offline_sync，favorite/pinned 为 true/false，tag 为标签关键词。\n2. search_notification_records(arguments): 只查询通知记录。arguments 可包含 start_at, end_at, search, source_app, via, from_device, delivery_status, favorite, pinned, tag, limit。start_at/end_at 必须是 Unix 毫秒时间戳整数；favorite/pinned 为 true/false，tag 为标签关键词。\n3. list_notification_apps(arguments): 列出已有通知记录的 App。arguments 可为空。\n4. get_record_detail(arguments): 获取某条记录详情。arguments 必须包含 record_id。\n5. summarize_records(arguments): 对已查询到的记录做摘要。arguments 可包含 record_ids；为空时摘要当前工具查询结果。\n6. export_answer_word(arguments): 将本次最终答案导出 Word。arguments 可包含 title, format，format 只能是 word。\n7. save_ai_session(arguments): 显式保存当前会话。arguments 可包含 title、selected_skill、source_filters。selected_skill 必须是可用 Skills 中的 id；source_filters 必须是 JSON 对象。\n\n当前界面筛选，仅作为参考，是否采用由你决定：\n{ui_filters_text}\n如果当前界面筛选包含 record_ids，它们是 PC 可查询记录 ID；你可以逐个用 get_record_detail 查询，或在已查询记录后传给 summarize_records。\n\n请自主选择 Skill 和一个或多个工具。必须只返回严格 JSON，格式如下：\n{{\"skill_id\":\"weekly_report\",\"final_answer_ready\":false,\"tools\":[{{\"name\":\"search_history_records\",\"arguments\":{{\"start_at\":1774972800000,\"end_at\":1777564799999,\"content_type\":\"text\",\"limit\":80}}}}]}}\n如果不需要 Skill，skill_id 为 null。至少选择一个工具。不要输出 Markdown，不要输出代码块。",
         if conversation_text.is_empty() {
             "暂无上文。".to_string()
         } else {
@@ -2322,7 +2489,7 @@ fn build_ai_assistant_react_prompt(
         .join("\n");
 
     format!(
-        "用户问题：\n{question}\n\n会话上下文：\n{}\n\n可用 Skills：\n{}\n\n已有观察结果：\n{}\n\n当前界面筛选，仅作为参考：\n{ui_filters_text}\n如果当前界面筛选包含 record_ids，它们是 PC 可查询记录 ID，可用于 get_record_detail 或 summarize_records。\n\n你需要判断是否还要继续调用工具。如果已有观察足够回答，返回 {{\"skill_id\":null,\"final_answer_ready\":true,\"tools\":[]}}。\n如果需要继续查，只能返回可执行工具 JSON，格式：{{\"skill_id\":null,\"final_answer_ready\":false,\"tools\":[{{\"name\":\"get_record_detail\",\"arguments\":{{\"record_id\":\"...\"}}}}]}}。\n可用工具同前：search_history_records、search_notification_records、list_notification_apps、get_record_detail、summarize_records、export_answer_word、save_ai_session。save_ai_session 可保存 title、selected_skill、source_filters。不要输出 Markdown，不要解释。",
+        "用户问题：\n{question}\n\n会话上下文：\n{}\n\n可用 Skills：\n{}\n\n已有观察结果：\n{}\n\n当前界面筛选，仅作为参考：\n{ui_filters_text}\n如果当前界面筛选包含 record_ids，它们是 PC 可查询记录 ID，可用于 get_record_detail 或 summarize_records。\n\n你需要判断是否还要继续调用工具。如果已有观察足够回答，返回 {{\"skill_id\":null,\"final_answer_ready\":true,\"tools\":[]}}。\n如果需要继续查，只能返回可执行工具 JSON，格式：{{\"skill_id\":null,\"final_answer_ready\":false,\"tools\":[{{\"name\":\"get_record_detail\",\"arguments\":{{\"record_id\":\"...\"}}}}]}}。\n可用工具同前：search_history_records、search_notification_records、list_notification_apps、get_record_detail、summarize_records、export_answer_word、save_ai_session。search 工具的 start_at/end_at 必须是 Unix 毫秒时间戳整数；save_ai_session 可保存 title、selected_skill、source_filters。不要输出 Markdown，不要解释。",
         if conversation_text.is_empty() {
             "暂无上文。".to_string()
         } else {
@@ -2348,7 +2515,7 @@ fn parse_ai_assistant_plan(
 ) -> Result<AiAssistantPlan, String> {
     let trimmed = plan_text.trim();
     let plan: AiAssistantPlan = serde_json::from_str(trimmed).map_err(|error| {
-        format!("AI 工具规划不是严格 JSON，已停止执行: {error}. 原始输出: {trimmed}")
+        format!("AI 工具规划 JSON 无效或参数类型不匹配，已停止执行: {error}. 原始输出: {trimmed}")
     })?;
     if require_tools && plan.tools.is_empty() {
         return Err("AI 工具规划没有选择任何工具，已停止执行。".to_string());
@@ -2583,12 +2750,17 @@ async fn unpair_device(device_id: String) -> Result<(), String> {
 }
 
 #[tauri::command]
-fn generate_pairing_qr() -> Result<String, String> {
+fn generate_pairing_qr(mode: Option<String>) -> Result<String, String> {
     let config = AppConfig::load();
+    let pairing_mode = match mode.as_deref() {
+        Some("lan") => "lan",
+        _ => "relay",
+    };
 
     let local_ip = network::discovery::get_local_ip().unwrap_or_default();
     let qr_data = serde_json::json!({
         "type": "VOICEINPUT_PAIR",
+        "pairing_mode": pairing_mode,
         "server_url": config.server_url,
         "device_id": config.device_id,
         "device_name": config.device_name,
@@ -2704,6 +2876,7 @@ mod tests {
             favorite: false,
             pinned: false,
             tags: "工作".to_string(),
+            category: history::DEFAULT_CATEGORY.to_string(),
         }
     }
 
@@ -2716,7 +2889,7 @@ mod tests {
         )
         .expect_err("non-json plans must fail");
 
-        assert!(error.contains("不是严格 JSON"));
+        assert!(error.contains("JSON 无效或参数类型不匹配"));
     }
 
     #[test]
@@ -2797,6 +2970,54 @@ mod tests {
         assert_eq!(plan.tools[0].arguments.favorite, Some(true));
         assert_eq!(plan.tools[0].arguments.pinned, Some(true));
         assert_eq!(plan.tools[0].arguments.tag.as_deref(), Some("项目A"));
+    }
+
+    #[test]
+    fn ai_plan_parser_accepts_date_strings_as_local_day_bounds() {
+        let plan = parse_ai_assistant_plan(
+            r#"{"skill_id":"weekly_report","final_answer_ready":false,"tools":[{"name":"search_history_records","arguments":{"start_at":"2026-04-01","end_at":"2026-04-30","limit":120}}]}"#,
+            true,
+            &test_skills(),
+        )
+        .expect("date strings should be normalized at the tool boundary");
+
+        let arguments = &plan.tools[0].arguments;
+        let start = chrono::Local
+            .timestamp_millis_opt(arguments.start_at.expect("start timestamp"))
+            .single()
+            .expect("valid local start timestamp");
+        let end = chrono::Local
+            .timestamp_millis_opt(arguments.end_at.expect("end timestamp"))
+            .single()
+            .expect("valid local end timestamp");
+        assert_eq!(start.format("%Y-%m-%d %H:%M:%S%.3f").to_string(), "2026-04-01 00:00:00.000");
+        assert_eq!(end.format("%Y-%m-%d %H:%M:%S%.3f").to_string(), "2026-04-30 23:59:59.999");
+        assert_eq!(arguments.limit, Some(120));
+    }
+
+    #[test]
+    fn ai_plan_parser_keeps_numeric_timestamps_and_accepts_rfc3339() {
+        let plan = parse_ai_assistant_plan(
+            r#"{"skill_id":null,"final_answer_ready":false,"tools":[{"name":"search_notification_records","arguments":{"start_at":1774972800000,"end_at":"2026-04-30T23:59:59.999+08:00"}}]}"#,
+            true,
+            &test_skills(),
+        )
+        .expect("numeric and RFC3339 timestamps should be accepted");
+
+        assert_eq!(plan.tools[0].arguments.start_at, Some(1774972800000));
+        assert_eq!(plan.tools[0].arguments.end_at, Some(1777564799999));
+    }
+
+    #[test]
+    fn ai_plan_parser_rejects_unrecognized_timestamp_text() {
+        let error = parse_ai_assistant_plan(
+            r#"{"skill_id":null,"final_answer_ready":false,"tools":[{"name":"search_history_records","arguments":{"start_at":"下个月"}}]}"#,
+            true,
+            &test_skills(),
+        )
+        .expect_err("unrecognized timestamp text must fail");
+
+        assert!(error.contains("时间参数必须是 Unix 毫秒时间戳"));
     }
 
     #[test]
@@ -2946,11 +3167,21 @@ pub fn run() {
             set_message_history_pinned,
             set_message_history_pinned_by_ids,
             set_message_history_tags,
+            list_history_categories,
+            add_history_category,
+            rename_history_category,
+            delete_history_category,
             copy_message_history_image_record,
             open_history_record_file,
             open_history_record_folder,
             open_path,
             open_parent_folder,
+            open_c2_screen_reader,
+            close_c2_screen_reader,
+            start_c2_screen_reader,
+            stop_c2_screen_reader,
+            get_c2_screen_reader_status,
+            debug_c2_reader_log,
             save_history_image_as,
             export_message_history,
             insert_text_to_cursor,
@@ -2963,6 +3194,8 @@ pub fn run() {
             import_ai_skills_json,
             create_ai_session,
             list_ai_sessions,
+            rename_ai_session,
+            delete_ai_session,
             add_ai_message,
             list_ai_messages,
             list_ai_tool_calls,

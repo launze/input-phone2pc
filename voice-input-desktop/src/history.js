@@ -140,6 +140,10 @@ export function filterHistoryRecords(records = [], filters = {}, tab = 'history'
             }
         }
 
+        if (filters.category && filters.category !== 'all' && (record.category || '语音输入') !== filters.category) {
+            return false;
+        }
+
         if (filters.sourceApp && filters.sourceApp !== 'all' && recordSourceAppKey(record) !== filters.sourceApp) {
             return false;
         }
@@ -153,6 +157,7 @@ export function filterHistoryRecords(records = [], filters = {}, tab = 'history'
             record.via,
             record.delivery_mode,
             record.content_type,
+            record.category,
             metadata?.app_name,
             metadata?.app_package,
             metadata?.title,
@@ -174,6 +179,7 @@ export function buildAiAssistantFilters(filters = {}, tab = 'history', limit = 1
         favorite: currentHistoryFavoriteFilter(filters),
         pinned: currentHistoryPinnedFilter(filters),
         tag: normalizedHistoryFilterValue(filters.tag),
+        category: normalizedHistoryFilterValue(filters.category),
         limit
     };
 }
@@ -194,6 +200,7 @@ export function buildAiAssistantScopeText(filters = {}, tab = 'history', labelFo
     if (filters.pinned === true) parts.push('状态=置顶');
     if (filters.source_app) parts.push(`来源App=${labelFor('sourceApp', filters.source_app) || filters.source_app}`);
     if (filters.tag) parts.push(`标签=${filters.tag}`);
+    if (filters.category) parts.push(`目录=${labelFor('category', filters.category) || filters.category}`);
     parts.push(`上限=${filters.limit || 120}条`);
     return `将把当前筛选作为 AI 工具参考：${parts.join('，')}。LLM 会自主选择 Skill 和工具。`;
 }
@@ -212,6 +219,7 @@ export function buildAiSessionScopeLabel(filters = {}) {
     if (filters.pinned === true) parts.push('置顶');
     if (filters.source_app) parts.push(`来源App=${filters.source_app}`);
     if (filters.tag) parts.push(`标签=${filters.tag}`);
+    if (filters.category) parts.push(`目录=${filters.category}`);
     if (Array.isArray(filters.record_ids) && filters.record_ids.length) {
         parts.push(`记录ID=${filters.record_ids.length}条`);
     }
@@ -279,6 +287,9 @@ export function renderHistoryItem(record, { selectionMode = false, selectedIds =
     const tagBadges = parseRecordTags(record.tags)
         .map(tag => `<span class="history-badge tag">#${escapeHtml(tag)}</span>`)
         .join('');
+    const categoryBadge = record.category
+        ? `<span class="history-badge category">${escapeHtml(record.category)}</span>`
+        : '';
     const typeBadge = `<span class="history-badge type">${escapeHtml(typeLabel)}</span>`;
     const itemClass = record.delivery_mode === 'offline_sync'
         ? 'history-item offline-sync'
@@ -334,6 +345,7 @@ export function renderHistoryItem(record, { selectionMode = false, selectedIds =
                 ${manualBadge}
                 ${favoriteBadge}
                 ${pinnedBadge}
+                ${categoryBadge}
                 ${tagBadges}
             </div>
             <div class="history-tags-editor" data-tags-editor-for="${escapeHtml(record.id)}" style="display:none;">

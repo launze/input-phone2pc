@@ -20,7 +20,7 @@ import com.journeyapps.barcodescanner.ScanOptions
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun QrScannerScreen(
-    onScanResult: (serverUrl: String, deviceId: String, deviceName: String, localIp: String, localPort: Int) -> Unit,
+    onScanResult: (serverUrl: String, deviceId: String, deviceName: String, localIp: String, localPort: Int, pairingMode: String) -> Unit,
     onBack: () -> Unit
 ) {
     val gson = remember { Gson() }
@@ -38,11 +38,13 @@ fun QrScannerScreen(
                     val deviceName = json.get("device_name")?.asString ?: ""
                     val localIp = json.get("local_ip")?.asString ?: ""
                     val localPort = json.get("local_port")?.asInt ?: 58889
+                    val pairingMode = json.get("pairing_mode")?.asString
+                        ?: if (serverUrl.isNotBlank()) "relay" else "lan"
 
                     if (deviceId.isNotEmpty()) {
                         scanStatus = "扫描成功! 正在配对 $deviceName ..."
                         hasError = false
-                        onScanResult(serverUrl, deviceId, deviceName, localIp, localPort)
+                        onScanResult(serverUrl, deviceId, deviceName, localIp, localPort, pairingMode)
                     } else {
                         scanStatus = "二维码内容不完整"
                         hasError = true

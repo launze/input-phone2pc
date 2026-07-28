@@ -124,7 +124,7 @@ fun InputField(
                 InputActionIcon(enabled = enabled, onClick = onPickFile) {
                     Icon(Icons.Default.AttachFile, contentDescription = "选择文件")
                 }
-                InputActionIcon(enabled = enabled, onClick = onScanFile) {
+                InputActionIcon(enabled = true, onClick = onScanFile) {
                     Icon(Icons.Default.QrCodeScanner, contentDescription = "扫码文件")
                 }
                 InputActionIcon(enabled = enabled, onClick = onTakePhoto) {

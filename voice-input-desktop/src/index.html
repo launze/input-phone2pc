@@ -25,6 +25,7 @@
             </div>
 
             <div class="toolbar-right">
+                <button id="open-c2-reader-btn" class="toolbar-menu-button" type="button">读取二维码</button>
                 <button id="toolbar-settings-btn" class="toolbar-menu-button" type="button" aria-expanded="false" aria-controls="toolbar-settings-menu">设置</button>
                 <div id="toolbar-settings-menu" class="toolbar-menu" style="display:none;">
                     <div class="toolbar-menu-section">
@@ -72,8 +73,10 @@
                 <div class="pairing-layout">
                     <!-- 二维码 -->
                     <div class="qr-area" id="qr-area" style="display:none;">
+                        <div id="qr-pairing-mode-label" class="qr-mode-label">服务器中转扫码</div>
                         <img id="qr-code-img" alt="配对二维码">
                         <button id="refresh-qr-btn" class="btn-small">刷新二维码</button>
+                        <button id="toggle-qr-mode-btn" class="btn-small">切换为局域网扫码配置</button>
                     </div>
 
                     <!-- 使用说明 -->
@@ -86,7 +89,7 @@
                             </div>
                             <div class="pairing-mode-card primary">
                                 <div class="pairing-mode-title">服务器中转配对</div>
-                                <div class="pairing-mode-desc">跨网络或局域网不可达时使用中转，先在右上设置中开启服务器中转。</div>
+                                <div class="pairing-mode-desc">跨网络或局域网不可达时使用中转，电脑端会自动连接中转服务器。</div>
                             </div>
                         </div>
                         <div class="steps">
@@ -153,6 +156,9 @@
 
                 <div class="history-filter-bar workspace-panel" data-history-only>
                     <input id="history-search-input" class="history-search-input" type="search" placeholder="搜索文字、来源或通道">
+                    <select id="history-category-filter" class="history-filter-select" aria-label="目录">
+                        <option value="all">全部目录</option>
+                    </select>
                     <select id="history-type-filter" class="history-filter-select" aria-label="内容类型">
                         <option value="all">全部类型</option>
                         <option value="text">文本</option>
@@ -214,7 +220,13 @@
                         </div>
                         <div class="ai-assistant-layout">
                             <div class="ai-session-column">
-                                <div class="ai-section-label">会话</div>
+                                <div class="ai-session-heading">
+                                    <div class="ai-section-label">会话</div>
+                                    <div class="ai-session-actions">
+                                        <button id="rename-ai-session-btn" class="btn-small" type="button" disabled>重命名</button>
+                                        <button id="delete-ai-session-btn" class="btn-small danger-action" type="button" disabled>删除</button>
+                                    </div>
+                                </div>
                                 <div id="ai-session-list" class="ai-session-list"></div>
                             </div>
                             <div class="ai-chat-column">
@@ -234,6 +246,13 @@
                                         <button id="stop-ai-session-btn" class="btn-small" style="display:none;">停止</button>
                                     </div>
                                     <div id="ai-session-status" class="ai-report-status"></div>
+                                    <details id="ai-error-details" class="ai-error-details" style="display:none;">
+                                        <summary>生成失败详情</summary>
+                                        <div class="ai-error-actions">
+                                            <button id="copy-ai-error-btn" class="btn-small" type="button">复制错误</button>
+                                        </div>
+                                        <pre id="ai-error-content"></pre>
+                                    </details>
                                 </div>
                                 <div class="ai-tool-column">
                                     <div class="ai-side-tabs" role="tablist" aria-label="AI 辅助信息">
@@ -345,6 +364,17 @@
                         </div>
                         <button id="cancel-edit-text-btn" class="btn-small" style="display:none;">取消编辑</button>
                     </div>
+                    <div class="category-control-row">
+                        <label class="category-picker">
+                            <span>目录</span>
+                            <select id="desktop-category-select" class="history-filter-select">
+                                <option value="语音输入">语音输入</option>
+                            </select>
+                        </label>
+                        <button id="add-desktop-category-btn" class="btn-small" type="button">新建</button>
+                        <button id="rename-desktop-category-btn" class="btn-small" type="button">修改</button>
+                        <button id="delete-desktop-category-btn" class="btn-small danger-action" type="button">删除</button>
+                    </div>
                     <textarea
                         id="desktop-text-editor"
                         class="desktop-text-editor"
@@ -369,6 +399,7 @@
                 </div>
             </div>
         </div>
+
     </div>
 
     <div id="toast-container" class="toast-container" aria-live="polite" aria-atomic="true"></div>

@@ -335,20 +335,24 @@ fun SettingsScreen(
                             if (connectionState is ServerConnection.ConnectionState.Connected) {
                                 Button(
                                     onClick = { viewModel.disconnectFromServer() },
-                                    modifier = Modifier.weight(1f),
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .heightIn(min = 40.dp),
                                     colors = ButtonDefaults.buttonColors(
                                         containerColor = MaterialTheme.colorScheme.error
                                     )
                                 ) {
-                                    Text("断开连接")
+                                    Text("断开连接", maxLines = 1)
                                 }
                             } else {
                                 Button(
                                     onClick = { viewModel.connectToServer(serverUrl) },
-                                    modifier = Modifier.weight(1f),
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .heightIn(min = 40.dp),
                                     enabled = serverUrl.isNotBlank()
                                 ) {
-                                    Text("连接服务器")
+                                    Text("连接服务器", maxLines = 1)
                                 }
                             }
                         }
@@ -813,9 +817,12 @@ fun SettingsScreen(
                                                     }
                                                 },
                                                 enabled = deviceState.defaultActionEnabled,
-                                                modifier = Modifier.weight(1f)
+                                                modifier = Modifier
+                                                    .weight(1f)
+                                                    .heightIn(min = 40.dp),
+                                                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp)
                                             ) {
-                                                Text(deviceState.defaultActionText)
+                                                Text(deviceState.defaultActionText, maxLines = 1)
                                             }
                                             OutlinedButton(
                                                 onClick = {
@@ -831,17 +838,26 @@ fun SettingsScreen(
                                                         snackbarHostState.showSnackbar(deviceState.reconnectFeedbackText)
                                                     }
                                                 },
-                                                modifier = Modifier.weight(1f)
+                                                modifier = Modifier
+                                                    .weight(1f)
+                                                    .heightIn(min = 40.dp),
+                                                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp)
                                             ) {
-                                                Text(deviceState.reconnectActionText)
+                                                Text(deviceState.reconnectActionText, maxLines = 1)
                                             }
+                                        }
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.End
+                                        ) {
                                             TextButton(
                                                 onClick = { viewModel.unpairDevice(device.deviceId) },
                                                 colors = ButtonDefaults.textButtonColors(
                                                     contentColor = MaterialTheme.colorScheme.error
-                                                )
+                                                ),
+                                                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)
                                             ) {
-                                                Text("取消配对")
+                                                Text("取消配对", maxLines = 1)
                                             }
                                         }
                                     }
@@ -1049,9 +1065,12 @@ fun SettingsScreen(
                                 }
                             },
                             enabled = !updateChecking && !updateInstalling,
-                            modifier = Modifier.weight(1f)
+                            modifier = Modifier
+                                .weight(1f)
+                                .heightIn(min = 40.dp),
+                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp)
                         ) {
-                            Text(if (updateChecking) "检查中..." else "检查更新")
+                            Text(if (updateChecking) "检查中..." else "检查更新", maxLines = 1)
                         }
 
                         Button(
@@ -1072,9 +1091,12 @@ fun SettingsScreen(
                                 }
                             },
                             enabled = updateInfo?.hasUpdate == true && !updateChecking && !updateInstalling,
-                            modifier = Modifier.weight(1f)
+                            modifier = Modifier
+                                .weight(1f)
+                                .heightIn(min = 40.dp),
+                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp)
                         ) {
-                            Text(if (updateInstalling) "下载中..." else "下载更新")
+                            Text(if (updateInstalling) "下载中..." else "下载更新", maxLines = 1)
                         }
                     }
                 }

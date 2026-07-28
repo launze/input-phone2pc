@@ -61,9 +61,10 @@ class HistoryExportFormatterTest {
         val lines = content.lines()
 
         assertEquals(
-            "id,timestamp,target_device_id,target_device_name,status,channel,content_type,source_app,source_package,server_message_id,stored_at,synced_at,favorite,pinned,tags,metadata,error_message,text",
+            "id,timestamp,target_device_id,target_device_name,status,channel,content_type,category,source_app,source_package,server_message_id,stored_at,synced_at,favorite,pinned,tags,metadata,error_message,text",
             lines.first()
         )
+        assertTrue(lines[1].contains("\"语音输入\""))
         assertTrue(lines[1].contains("\"微信,工作\""))
         assertTrue(lines[1].contains("\"{\"\"title\"\":\"\"项目\"\"}\""))
         assertTrue(lines[1].contains("\"失败,重试\""))
