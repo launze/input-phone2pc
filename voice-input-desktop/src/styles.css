@@ -1413,7 +1413,7 @@ input:checked + .slider:before {
 
 .ai-config-grid {
     display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-columns: minmax(120px, 0.65fr) repeat(3, minmax(0, 1fr));
     gap: 10px;
 }
 

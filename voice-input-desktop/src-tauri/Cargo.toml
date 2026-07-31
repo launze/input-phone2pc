@@ -1,6 +1,6 @@
 [package]
 name = "voice-input-desktop"
-version = "1.2.21"
+version = "1.2.24"
 description = "手机转电脑输入助手"
 authors = ["Voice Input Team"]
 edition = "2021"

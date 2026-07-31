@@ -1,8 +1,80 @@
 {
   "channel": "stable",
-  "latest_version": "1.2.21",
+  "latest_version": "1.2.24",
   "minimum_supported_version": "0.0.1",
   "releases": [
+    {
+      "version": "1.2.24",
+      "release_notes": "修复 PC AI 助手接入阿里云百炼 Code Plan（qwen3.6-plus）时规划请求被误判为 Coding Agent 并返回 405 的问题；规划和 ReAct 请求改用非流式响应，并增强已完成 SSE 流对异常尾部的兼容，提升周报和问答稳定性。",
+      "published_at": "2026-07-31T12:38:05+08:00",
+      "force_update": false,
+      "assets": [
+        {
+          "platform": "windows",
+          "arch": "x64",
+          "file_name": "voiceinput-desktop-windows-x64-v1.2.24-setup.exe",
+          "sha256": "696040c9f9b7504be4624bb04eb0ae88bfccb6d2fb3d59f80c56f9937424495c",
+          "size": 8376869,
+          "mime_type": "application/vnd.microsoft.portable-executable"
+        },
+        {
+          "platform": "windows",
+          "arch": "x64",
+          "file_name": "voiceinput-desktop-windows-x64-v1.2.24.msi",
+          "sha256": "c2f6aed1d0ffdeef252c627175455c1314d34880a7ff14a1b3d36b15a0164fd9",
+          "size": 12046336,
+          "mime_type": "application/x-msi"
+        }
+      ]
+    },
+    {
+      "version": "1.2.23",
+      "release_notes": "修复 DeepSeek 等兼容接口仅通过 SSE reasoning_content 返回文本时，PC AI 助手误报未返回可解析内容的问题；正常 content 正文仍优先使用。",
+      "published_at": "2026-07-30T12:06:16+08:00",
+      "force_update": false,
+      "assets": [
+        {
+          "platform": "windows",
+          "arch": "x64",
+          "file_name": "voiceinput-desktop-windows-x64-v1.2.23-setup.exe",
+          "sha256": "b799778ebe2923b4ef1e6b598d8b146cd3b8bfeafc3b9b0fdc298c9878b451ec",
+          "size": 8357891,
+          "mime_type": "application/vnd.microsoft.portable-executable"
+        },
+        {
+          "platform": "windows",
+          "arch": "x64",
+          "file_name": "voiceinput-desktop-windows-x64-v1.2.23.msi",
+          "sha256": "808d4b8825fcffcf7c54dbb45195a641b77d2a032822ec264844d27b72784270",
+          "size": 12038144,
+          "mime_type": "application/x-msi"
+        }
+      ]
+    },
+    {
+      "version": "1.2.22",
+      "release_notes": "PC 端 AI 配置新增火山引擎类型，支持 Coding API v3 Chat Completions；修复模型将 monthly_report 等 Skill ID 误作工具名时生成失败的问题。",
+      "published_at": "2026-07-28T19:50:59+08:00",
+      "force_update": false,
+      "assets": [
+        {
+          "platform": "windows",
+          "arch": "x64",
+          "file_name": "voiceinput-desktop-windows-x64-v1.2.22-setup.exe",
+          "sha256": "6ec622b8c59ae0d7fb1980acd83914a7dfab2d0d011801f76337c4f96b80a752",
+          "size": 8353471,
+          "mime_type": "application/vnd.microsoft.portable-executable"
+        },
+        {
+          "platform": "windows",
+          "arch": "x64",
+          "file_name": "voiceinput-desktop-windows-x64-v1.2.22.msi",
+          "sha256": "9e5ed10fccae638944f53bbc25b497dd4b8e14880d67bb1ef88fc38b9fce320d",
+          "size": 12034048,
+          "mime_type": "application/x-msi"
+        }
+      ]
+    },
     {
       "version": "1.2.21",
       "release_notes": "修复 PC AI 助手按日期生成报告时，模型返回 YYYY-MM-DD 导致工具规划参数类型错误的问题；日期区间会按本地时区自动转换为完整的起止时间。",

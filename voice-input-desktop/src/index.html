@@ -281,6 +281,16 @@
                         </div>
                         <div class="ai-config-grid">
                             <label class="ai-field">
+                                <span>类型</span>
+                                <select id="openai-provider">
+                                    <option value="openai">OpenAI</option>
+                                    <option value="volcengine">火山引擎</option>
+                                    <option value="deepseek">DeepSeek</option>
+                                    <option value="dashscope">阿里百炼</option>
+                                    <option value="custom">自定义</option>
+                                </select>
+                            </label>
+                            <label class="ai-field">
                                 <span>API Key</span>
                                 <input id="openai-api-key" type="password" placeholder="sk-..." autocomplete="off">
                             </label>
@@ -290,7 +300,7 @@
                             </label>
                             <label class="ai-field">
                                 <span>模型名称</span>
-                                <input id="openai-model-name" type="text" placeholder="gpt-5-mini / deepseek-chat">
+                                <input id="openai-model-name" type="text" placeholder="模型名称或火山引擎模型 ID">
                             </label>
                         </div>
                         <div class="ai-settings-split">

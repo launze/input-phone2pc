@@ -1,6 +1,6 @@
 {
   "name": "voice-input-desktop",
-  "version": "1.2.21",
+  "version": "1.2.24",
   "description": "手机转电脑语音输入助手",
   "type": "module",
   "scripts": {

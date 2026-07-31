@@ -46,6 +46,7 @@ import {
     toRangeStart
 } from './reports.js';
 import {
+    applyOpenAiProviderPreset,
     hasConfiguredOpenAi,
     inputModeLabel,
     normalizeInputMode,
@@ -283,6 +284,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     const aiConfigCard = document.getElementById('ai-config-card');
     const aiSetupHint = document.getElementById('ai-setup-hint');
     const saveOpenAiConfigBtn = document.getElementById('save-openai-config-btn');
+    const openaiProviderSelect = document.getElementById('openai-provider');
     const openaiApiKeyInput = document.getElementById('openai-api-key');
     const openaiApiUrlInput = document.getElementById('openai-api-url');
     const openaiModelNameInput = document.getElementById('openai-model-name');
@@ -538,9 +540,10 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     function populateOpenAiConfig(openai = {}) {
         const normalized = normalizeOpenAiConfig(openai);
+        if (openaiProviderSelect) openaiProviderSelect.value = normalized.provider;
         if (openaiApiKeyInput) openaiApiKeyInput.value = normalized.api_key;
-        if (openaiApiUrlInput) openaiApiUrlInput.value = normalized.api_url || 'https://api.openai.com/v1/responses';
-        if (openaiModelNameInput) openaiModelNameInput.value = normalized.model_name || 'gpt-5-mini';
+        if (openaiApiUrlInput) openaiApiUrlInput.value = normalized.api_url;
+        if (openaiModelNameInput) openaiModelNameInput.value = normalized.model_name;
     }
 
     function setUpdateUi(message = '', { busy = false, updateInfo = currentUpdateInfo } = {}) {
@@ -741,6 +744,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     function collectOpenAiConfigFromForm() {
         return {
+            provider: openaiProviderSelect?.value || 'custom',
             api_key: (openaiApiKeyInput?.value || '').trim(),
             api_url: (openaiApiUrlInput?.value || '').trim(),
             model_name: (openaiModelNameInput?.value || '').trim()
@@ -3299,6 +3303,16 @@ document.addEventListener('DOMContentLoaded', async () => {
             console.error('清空记录失败:', error);
             showToast(dialog.errorMessage, 'error');
         }
+    });
+
+    openaiProviderSelect?.addEventListener('change', () => {
+        const configured = applyOpenAiProviderPreset(
+            collectOpenAiConfigFromForm(),
+            openaiProviderSelect.value
+        );
+        if (openaiApiUrlInput) openaiApiUrlInput.value = configured.api_url;
+        if (openaiModelNameInput) openaiModelNameInput.value = configured.model_name;
+        refreshAiConfigurationState(configured);
     });
 
     [

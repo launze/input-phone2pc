@@ -30,6 +30,7 @@ pub struct PairedDevice {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct OpenAiConfig {
+    pub provider: String,
     pub api_key: String,
     pub api_url: String,
     pub model_name: String,
@@ -55,6 +56,7 @@ impl Default for AppConfig {
 impl Default for OpenAiConfig {
     fn default() -> Self {
         Self {
+            provider: "custom".to_string(),
             api_key: String::new(),
             api_url: "https://api.openai.com/v1/responses".to_string(),
             model_name: "gpt-5-mini".to_string(),
@@ -140,4 +142,24 @@ fn migrate_server_url(config: &mut AppConfig) -> bool {
         return true;
     }
     false
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn legacy_openai_config_without_provider_remains_compatible() {
+        let config: OpenAiConfig = serde_json::from_value(serde_json::json!({
+            "api_key": "legacy-key",
+            "api_url": "https://api.deepseek.com",
+            "model_name": "deepseek-chat"
+        }))
+        .expect("legacy config should deserialize");
+
+        assert_eq!(config.provider, "custom");
+        assert_eq!(config.api_key, "legacy-key");
+        assert_eq!(config.api_url, "https://api.deepseek.com");
+        assert_eq!(config.model_name, "deepseek-chat");
+    }
 }

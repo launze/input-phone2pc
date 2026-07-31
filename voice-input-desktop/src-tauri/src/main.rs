@@ -1425,7 +1425,7 @@ async fn run_ai_assistant(
     let plan_text = match reporting::generate_openai_text(
         config.openai.clone(),
         &plan_prompt,
-        "你是语传 AI 助手的工具规划器。必须只输出 JSON，不要输出解释、Markdown 或代码块。你要自主选择 Skill 和工具，不能让前端或程序替你兜底。",
+        "你是语传 AI 助手的工具规划器。必须只输出 JSON，不要输出解释、Markdown 或代码块。Skill ID 只能放在 skill_id，tools[].name 只能使用提示词列出的可用工具名，不能把 monthly_report 等 Skill ID 当作工具名。你要自主选择 Skill 和工具。",
         None,
     )
     .await
@@ -2514,9 +2514,10 @@ fn parse_ai_assistant_plan(
     skills: &[AiSkill],
 ) -> Result<AiAssistantPlan, String> {
     let trimmed = plan_text.trim();
-    let plan: AiAssistantPlan = serde_json::from_str(trimmed).map_err(|error| {
+    let mut plan: AiAssistantPlan = serde_json::from_str(trimmed).map_err(|error| {
         format!("AI 工具规划 JSON 无效或参数类型不匹配，已停止执行: {error}. 原始输出: {trimmed}")
     })?;
+    normalize_ai_assistant_plan(&mut plan, skills);
     if require_tools && plan.tools.is_empty() {
         return Err("AI 工具规划没有选择任何工具，已停止执行。".to_string());
     }
@@ -2525,6 +2526,44 @@ fn parse_ai_assistant_plan(
     }
     validate_ai_assistant_plan(&plan, skills)?;
     Ok(plan)
+}
+
+fn normalize_ai_assistant_plan(plan: &mut AiAssistantPlan, skills: &[AiSkill]) {
+    for tool in &mut plan.tools {
+        tool.name = tool.name.trim().to_string();
+        if is_allowed_ai_assistant_tool(&tool.name) {
+            continue;
+        }
+        let Some(skill) = skills
+            .iter()
+            .find(|skill| skill_is_available(skill, &tool.name))
+        else {
+            continue;
+        };
+
+        if plan
+            .skill_id
+            .as_deref()
+            .map(str::trim)
+            .filter(|id| !id.is_empty())
+            .is_none()
+        {
+            plan.skill_id = Some(skill.id.clone());
+        }
+        if tool.arguments.content_type.is_none() {
+            tool.arguments.content_type = serde_json::from_str::<serde_json::Value>(
+                &skill.default_filters,
+            )
+            .ok()
+            .and_then(|filters| {
+                filters
+                    .get("content_type")
+                    .and_then(|value| value.as_str())
+                    .map(str::to_string)
+            });
+        }
+        tool.name = "search_history_records".to_string();
+    }
 }
 
 fn validate_ai_assistant_plan(plan: &AiAssistantPlan, skills: &[AiSkill]) -> Result<(), String> {
@@ -2918,6 +2957,30 @@ mod tests {
     }
 
     #[test]
+    fn ai_plan_parser_normalizes_monthly_report_skill_used_as_tool() {
+        let mut monthly_skill = test_skills().remove(0);
+        monthly_skill.id = "monthly_report".to_string();
+        monthly_skill.default_filters =
+            r#"{"content_type":"text,image,file,notification"}"#.to_string();
+
+        let plan = parse_ai_assistant_plan(
+            r#"{"skill_id":null,"final_answer_ready":false,"tools":[{"name":"monthly_report","arguments":{"start_at":"2026-07-01","end_at":"2026-07-31"}}]}"#,
+            true,
+            &[monthly_skill],
+        )
+        .expect("an enabled skill alias should normalize to a history search");
+
+        assert_eq!(plan.skill_id.as_deref(), Some("monthly_report"));
+        assert_eq!(plan.tools[0].name, "search_history_records");
+        assert_eq!(
+            plan.tools[0].arguments.content_type.as_deref(),
+            Some("text,image,file,notification")
+        );
+        assert!(plan.tools[0].arguments.start_at.is_some());
+        assert!(plan.tools[0].arguments.end_at.is_some());
+    }
+
+    #[test]
     fn ai_plan_parser_rejects_disabled_or_missing_skill() {
         let error = parse_ai_assistant_plan(
             r#"{"skill_id":"daily_report","final_answer_ready":false,"tools":[{"name":"search_history_records","arguments":{}}]}"#,
@@ -3138,6 +3201,7 @@ mod tests {
         assert!(content.contains("### summarize_records"));
         assert!(content.contains("摘要: 项目群提醒下午三点同步。"));
     }
+
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]

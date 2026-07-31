@@ -80,21 +80,31 @@ pub async fn generate_openai_text(
     stream_handle: Option<ReportStreamHandle>,
 ) -> Result<String, String> {
     validate_openai_config(&openai)?;
-    let api_target = resolve_api_target(&openai.api_url);
+    let api_target = resolve_api_target(&openai.api_url, &openai.provider);
+    let stream_requested = stream_handle.is_some();
     let client = reqwest::Client::builder()
+        .user_agent(concat!("VoiceInput/", env!("CARGO_PKG_VERSION")))
         .timeout(Duration::from_secs(120))
         .build()
         .map_err(|e| format!("创建 HTTP 客户端失败: {e}"))?;
 
     let response = client
         .post(&api_target.endpoint)
-        .header(ACCEPT, "application/json, text/event-stream")
+        .header(
+            ACCEPT,
+            if stream_requested {
+                "text/event-stream, application/json"
+            } else {
+                "application/json"
+            },
+        )
         .bearer_auth(openai.api_key.trim())
         .json(&build_api_payload_with_system(
             &api_target.protocol,
             &openai.model_name,
             prompt,
             system_prompt,
+            stream_requested,
         ))
         .send()
         .await
@@ -225,7 +235,7 @@ fn validate_openai_config(config: &OpenAiConfig) -> Result<(), String> {
     Ok(())
 }
 
-fn resolve_api_target(api_url: &str) -> ApiTarget {
+fn resolve_api_target(api_url: &str, provider: &str) -> ApiTarget {
     let trimmed = api_url.trim().trim_end_matches('/');
     if trimmed.is_empty() {
         return ApiTarget {
@@ -245,7 +255,7 @@ fn resolve_api_target(api_url: &str) -> ApiTarget {
             protocol: ApiProtocol::Responses,
         };
     }
-    if is_chat_completions_provider_url(trimmed) {
+    if is_chat_completions_provider(provider) || is_chat_completions_provider_url(trimmed) {
         return ApiTarget {
             endpoint: format!("{trimmed}/chat/completions"),
             protocol: ApiProtocol::ChatCompletions,
@@ -269,11 +279,19 @@ fn resolve_api_target(api_url: &str) -> ApiTarget {
     }
 }
 
+fn is_chat_completions_provider(provider: &str) -> bool {
+    matches!(
+        provider.trim().to_ascii_lowercase().as_str(),
+        "volcengine" | "deepseek" | "dashscope"
+    )
+}
+
 fn is_chat_completions_provider_url(api_url: &str) -> bool {
     let lower = api_url.to_ascii_lowercase();
     lower.contains("/compatible-mode/")
         || lower.contains("dashscope")
         || lower.contains("api.deepseek.com")
+        || lower.contains("ark.cn-beijing.volces.com")
 }
 
 fn extract_response_text(response_json: &Value, protocol: &ApiProtocol) -> Option<String> {
@@ -757,7 +775,28 @@ async fn consume_sse_response_body(
 
     while let Some(chunk) = stream.next().await {
         ensure_stream_not_cancelled(stream_handle)?;
-        let bytes = chunk.map_err(|e| format!("读取 AI API 流式响应失败: {e}"))?;
+        let bytes = match chunk {
+            Ok(bytes) => bytes,
+            Err(error) => {
+                if !normalized_buffer.trim().is_empty() {
+                    process_sse_block(&normalized_buffer, protocol, stream_handle, &mut state);
+                    normalized_buffer.clear();
+                }
+                if state.completed {
+                    break;
+                }
+                let received = state.received_content_chars();
+                let progress = if received == 0 {
+                    String::new()
+                } else {
+                    format!("（中断前已收到 {received} 个字符，未检测到完整结束标记）")
+                };
+                return Err(format!(
+                    "读取 AI API 流式响应失败{progress}: {}",
+                    reqwest_error_chain(&error)
+                ));
+            }
+        };
         let chunk_text = String::from_utf8_lossy(&bytes);
         raw_response.push_str(&chunk_text);
         normalized_buffer.push_str(&chunk_text.replace("\r\n", "\n"));
@@ -783,6 +822,13 @@ async fn consume_sse_response_body(
                 None
             } else {
                 Some(state.content_chunks.join(""))
+            }
+        })
+        .or_else(|| {
+            if state.reasoning_chunks.is_empty() {
+                None
+            } else {
+                Some(state.reasoning_chunks.join(""))
             }
         });
     let mut final_json = state.final_json;
@@ -846,13 +892,21 @@ fn process_sse_data_chunk(
     state: &mut StreamingParseState,
 ) {
     let trimmed = data.trim();
-    if trimmed.is_empty() || trimmed == "[DONE]" {
+    if trimmed.is_empty() {
+        return;
+    }
+    if trimmed == "[DONE]" {
+        state.completed = true;
         return;
     }
 
     let Ok(event_json) = serde_json::from_str::<Value>(trimmed) else {
         return;
     };
+
+    if is_completed_sse_event(&event_json, protocol) {
+        state.completed = true;
+    }
 
     if state.error_message.is_none() {
         state.error_message = extract_json_error_message(&event_json);
@@ -870,6 +924,10 @@ fn process_sse_data_chunk(
                 emit_report_stream_delta(stream_handle, &delta);
             }
             state.content_chunks.push(delta);
+        }
+    } else if let Some(reasoning) = extract_chat_completions_sse_reasoning_text(&event_json) {
+        if !reasoning.is_empty() {
+            state.reasoning_chunks.push(reasoning);
         }
     }
 }
@@ -912,6 +970,7 @@ fn looks_like_sse(content_type: &str, response_text: &str) -> bool {
 fn parse_sse_response_body(response_text: &str, protocol: &ApiProtocol) -> ParsedApiBody {
     let mut final_json: Option<Value> = None;
     let mut content_chunks = Vec::new();
+    let mut reasoning_chunks = Vec::new();
     let mut error_message: Option<String> = None;
 
     for data in extract_sse_data_chunks(response_text) {
@@ -938,6 +997,12 @@ fn parse_sse_response_body(response_text: &str, protocol: &ApiProtocol) -> Parse
             if !chunk.is_empty() {
                 content_chunks.push(chunk);
             }
+        } else if let Some(reasoning) =
+            extract_chat_completions_sse_reasoning_text(&event_json)
+        {
+            if !reasoning.is_empty() {
+                reasoning_chunks.push(reasoning);
+            }
         }
     }
 
@@ -949,6 +1014,13 @@ fn parse_sse_response_body(response_text: &str, protocol: &ApiProtocol) -> Parse
                 None
             } else {
                 Some(content_chunks.join(""))
+            }
+        })
+        .or_else(|| {
+            if reasoning_chunks.is_empty() {
+                None
+            } else {
+                Some(reasoning_chunks.join(""))
             }
         });
 
@@ -987,6 +1059,38 @@ fn extract_sse_delta_text(event_json: &Value, protocol: &ApiProtocol) -> Option<
         ApiProtocol::ChatCompletions => extract_chat_completions_sse_delta_text(event_json)
             .or_else(|| extract_responses_sse_delta_text(event_json)),
     }
+}
+
+fn is_completed_sse_event(event_json: &Value, protocol: &ApiProtocol) -> bool {
+    match protocol {
+        ApiProtocol::Responses => event_json
+            .get("type")
+            .and_then(Value::as_str)
+            .is_some_and(|event_type| event_type == "response.completed"),
+        ApiProtocol::ChatCompletions => event_json
+            .get("choices")
+            .and_then(Value::as_array)
+            .is_some_and(|choices| {
+                choices.iter().any(|choice| {
+                    choice
+                        .get("finish_reason")
+                        .is_some_and(|reason| !reason.is_null())
+                })
+            }),
+    }
+}
+
+fn reqwest_error_chain(error: &reqwest::Error) -> String {
+    let mut messages = vec![error.to_string()];
+    let mut source = std::error::Error::source(error);
+    while let Some(cause) = source {
+        let message = cause.to_string();
+        if messages.last() != Some(&message) {
+            messages.push(message);
+        }
+        source = cause.source();
+    }
+    messages.join(": ")
 }
 
 fn extract_responses_sse_delta_text(event_json: &Value) -> Option<String> {
@@ -1030,6 +1134,27 @@ fn extract_chat_completions_sse_delta_text(event_json: &Value) -> Option<String>
             }
         }
     }
+
+    if chunks.is_empty() {
+        None
+    } else {
+        Some(chunks.join(""))
+    }
+}
+
+fn extract_chat_completions_sse_reasoning_text(event_json: &Value) -> Option<String> {
+    let choices = event_json.get("choices")?.as_array()?;
+    let chunks = choices
+        .iter()
+        .filter_map(|choice| {
+            choice
+                .get("delta")?
+                .get("reasoning_content")?
+                .as_str()
+                .filter(|value| !value.is_empty())
+                .map(str::to_string)
+        })
+        .collect::<Vec<_>>();
 
     if chunks.is_empty() {
         None
@@ -1124,17 +1249,18 @@ fn build_api_payload_with_system(
     model_name: &str,
     prompt: &str,
     system_prompt: &str,
+    stream: bool,
 ) -> Value {
     match protocol {
         ApiProtocol::Responses => serde_json::json!({
             "model": model_name,
-            "stream": true,
+            "stream": stream,
             "instructions": system_prompt,
             "input": prompt,
         }),
         ApiProtocol::ChatCompletions => serde_json::json!({
             "model": model_name,
-            "stream": true,
+            "stream": stream,
             "messages": [
                 {
                     "role": "system",
@@ -1187,31 +1313,37 @@ fn extract_chat_completions_text(response_json: &Value) -> Option<String> {
     let choices = response_json.get("choices")?.as_array()?;
     let first = choices.first()?;
     let message = first.get("message")?;
-    let content = message.get("content")?;
 
-    if let Some(text) = content.as_str() {
-        let trimmed = text.trim();
-        if !trimmed.is_empty() {
-            return Some(trimmed.to_string());
-        }
-    }
-
-    if let Some(parts) = content.as_array() {
-        let mut chunks = Vec::new();
-        for part in parts {
-            if let Some(text) = part.get("text").and_then(Value::as_str) {
-                let trimmed = text.trim();
-                if !trimmed.is_empty() {
-                    chunks.push(trimmed.to_string());
-                }
+    if let Some(content) = message.get("content") {
+        if let Some(text) = content.as_str() {
+            let trimmed = text.trim();
+            if !trimmed.is_empty() {
+                return Some(trimmed.to_string());
             }
         }
-        if !chunks.is_empty() {
-            return Some(chunks.join("\n\n"));
+
+        if let Some(parts) = content.as_array() {
+            let mut chunks = Vec::new();
+            for part in parts {
+                if let Some(text) = part.get("text").and_then(Value::as_str) {
+                    let trimmed = text.trim();
+                    if !trimmed.is_empty() {
+                        chunks.push(trimmed.to_string());
+                    }
+                }
+            }
+            if !chunks.is_empty() {
+                return Some(chunks.join("\n\n"));
+            }
         }
     }
 
-    None
+    message
+        .get("reasoning_content")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
 }
 
 struct ApiTarget {
@@ -1231,7 +1363,19 @@ struct ParsedApiBody {
 struct StreamingParseState {
     final_json: Option<Value>,
     content_chunks: Vec<String>,
+    reasoning_chunks: Vec<String>,
     error_message: Option<String>,
+    completed: bool,
+}
+
+impl StreamingParseState {
+    fn received_content_chars(&self) -> usize {
+        self.content_chunks
+            .iter()
+            .chain(self.reasoning_chunks.iter())
+            .map(|chunk| chunk.chars().count())
+            .sum()
+    }
 }
 
 enum ApiProtocol {
@@ -1249,14 +1393,51 @@ enum ResponseBodyTransport {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::net::TcpListener;
+
+    async fn malformed_chunked_sse_response(blocks: &[&str]) -> reqwest::Response {
+        let listener = TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("test listener should bind");
+        let address = listener
+            .local_addr()
+            .expect("test listener should have an address");
+        let body = blocks.concat();
+        let server = tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.expect("test request should connect");
+            let mut request = [0_u8; 2048];
+            let _ = socket.read(&mut request).await;
+            socket
+                .write_all(
+                    b"HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nTransfer-Encoding: chunked\r\n\r\n",
+                )
+                .await
+                .expect("test response headers should be written");
+            socket
+                .write_all(format!("{:X}\r\n{body}\r\n", body.len()).as_bytes())
+                .await
+                .expect("test response body should be written");
+            socket
+                .write_all(b"invalid-chunk-size\r\n")
+                .await
+                .expect("malformed chunk should be written");
+        });
+
+        let response = reqwest::get(format!("http://{address}"))
+            .await
+            .expect("test request should receive response headers");
+        server.await.expect("test server should finish");
+        response
+    }
 
     #[test]
     fn resolve_api_target_supports_deepseek_base_urls() {
-        let target = resolve_api_target("https://api.deepseek.com");
+        let target = resolve_api_target("https://api.deepseek.com", "custom");
         assert_eq!(target.endpoint, "https://api.deepseek.com/chat/completions");
         assert!(matches!(target.protocol, ApiProtocol::ChatCompletions));
 
-        let target = resolve_api_target("https://api.deepseek.com/v1");
+        let target = resolve_api_target("https://api.deepseek.com/v1", "custom");
         assert_eq!(
             target.endpoint,
             "https://api.deepseek.com/v1/chat/completions"
@@ -1265,8 +1446,33 @@ mod tests {
     }
 
     #[test]
+    fn resolve_api_target_supports_volcano_engine_coding_urls() {
+        let target = resolve_api_target(
+            "https://ark.cn-beijing.volces.com/api/coding/v3",
+            "custom",
+        );
+        assert_eq!(
+            target.endpoint,
+            "https://ark.cn-beijing.volces.com/api/coding/v3/chat/completions"
+        );
+        assert!(matches!(target.protocol, ApiProtocol::ChatCompletions));
+
+        let endpoint = "https://ark.cn-beijing.volces.com/api/coding/v3/chat/completions";
+        let target = resolve_api_target(endpoint, "volcengine");
+        assert_eq!(target.endpoint, endpoint);
+        assert!(matches!(target.protocol, ApiProtocol::ChatCompletions));
+
+        let target = resolve_api_target("https://ai-proxy.example.com/v3", "volcengine");
+        assert_eq!(
+            target.endpoint,
+            "https://ai-proxy.example.com/v3/chat/completions"
+        );
+        assert!(matches!(target.protocol, ApiProtocol::ChatCompletions));
+    }
+
+    #[test]
     fn resolve_api_target_keeps_openai_v1_on_responses() {
-        let target = resolve_api_target("https://api.openai.com/v1");
+        let target = resolve_api_target("https://api.openai.com/v1", "openai");
         assert_eq!(target.endpoint, "https://api.openai.com/v1/responses");
         assert!(matches!(target.protocol, ApiProtocol::Responses));
     }
@@ -1343,6 +1549,30 @@ mod tests {
     }
 
     #[test]
+    fn parse_sse_response_body_falls_back_to_deepseek_reasoning_content() {
+        let parsed = parse_sse_response_body(
+            "data: {\"choices\":[{\"delta\":{\"content\":null,\"reasoning_content\":\"正在分析\"}}]}\n\n\
+             data: {\"choices\":[{\"delta\":{\"content\":null,\"reasoning_content\":\"记录。\"}}]}\n\n\
+             data: [DONE]\n\n",
+            &ApiProtocol::ChatCompletions,
+        );
+
+        assert_eq!(parsed.content.as_deref(), Some("正在分析记录。"));
+    }
+
+    #[test]
+    fn parse_sse_response_body_prefers_content_over_reasoning_content() {
+        let parsed = parse_sse_response_body(
+            "data: {\"choices\":[{\"delta\":{\"content\":null,\"reasoning_content\":\"内部推理\"}}]}\n\n\
+             data: {\"choices\":[{\"delta\":{\"content\":\"没有查询到记录。\"}}]}\n\n\
+             data: [DONE]\n\n",
+            &ApiProtocol::ChatCompletions,
+        );
+
+        assert_eq!(parsed.content.as_deref(), Some("没有查询到记录。"));
+    }
+
+    #[test]
     fn parse_sse_response_body_supports_responses_delta() {
         let parsed = parse_sse_response_body(
             "event: response.output_text.delta\n\
@@ -1355,5 +1585,123 @@ mod tests {
 
         assert_eq!(parsed.transport, ResponseBodyTransport::Sse);
         assert_eq!(parsed.content.as_deref(), Some("总览：本周推进顺利。"));
+    }
+
+    #[test]
+    fn detects_terminal_events_for_supported_stream_protocols() {
+        assert!(is_completed_sse_event(
+            &serde_json::json!({ "type": "response.completed", "response": {} }),
+            &ApiProtocol::Responses,
+        ));
+        assert!(is_completed_sse_event(
+            &serde_json::json!({ "choices": [{ "finish_reason": "stop" }] }),
+            &ApiProtocol::ChatCompletions,
+        ));
+        assert!(!is_completed_sse_event(
+            &serde_json::json!({ "choices": [{ "finish_reason": null }] }),
+            &ApiProtocol::ChatCompletions,
+        ));
+    }
+
+    #[test]
+    fn api_payload_only_enables_streaming_for_streamed_ui_requests() {
+        let payload = build_api_payload_with_system(
+            &ApiProtocol::Responses,
+            "test-model",
+            "prompt",
+            "system",
+            false,
+        );
+        assert_eq!(payload.get("stream").and_then(Value::as_bool), Some(false));
+
+        let payload = build_api_payload_with_system(
+            &ApiProtocol::ChatCompletions,
+            "test-model",
+            "prompt",
+            "system",
+            true,
+        );
+        assert_eq!(payload.get("stream").and_then(Value::as_bool), Some(true));
+    }
+
+    #[tokio::test]
+    async fn completed_sse_survives_a_malformed_http_body_tail() {
+        let response = malformed_chunked_sse_response(&[
+            "data: {\"type\":\"response.output_text.delta\",\"delta\":\"完成\"}\n\n",
+            "data: {\"type\":\"response.completed\",\"response\":{\"output_text\":\"完成\"}}\n\n",
+        ])
+        .await;
+
+        let parsed = consume_sse_response_body(response, &ApiProtocol::Responses, None)
+            .await
+            .expect("completed stream should tolerate a malformed transport tail");
+        assert_eq!(parsed.content.as_deref(), Some("完成"));
+    }
+
+    #[tokio::test]
+    async fn incomplete_sse_still_reports_a_malformed_http_body() {
+        let response = malformed_chunked_sse_response(&[
+            "data: {\"type\":\"response.output_text.delta\",\"delta\":\"未完成\"}\n\n",
+        ])
+        .await;
+
+        let error = match consume_sse_response_body(response, &ApiProtocol::Responses, None).await {
+            Ok(_) => panic!("incomplete stream should preserve the transport failure"),
+            Err(error) => error,
+        };
+        assert!(error.contains("未检测到完整结束标记"));
+        assert!(error.contains("3 个字符"));
+    }
+
+    #[tokio::test]
+    async fn ai_requests_identify_the_voiceinput_client() {
+        let listener = TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("test listener should bind");
+        let address = listener
+            .local_addr()
+            .expect("test listener should have an address");
+        let server = tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.expect("test request should connect");
+            let mut request = vec![0_u8; 8192];
+            let read = socket
+                .read(&mut request)
+                .await
+                .expect("test request should be readable");
+            let request = String::from_utf8_lossy(&request[..read]).to_ascii_lowercase();
+            assert!(request.contains(&format!(
+                "user-agent: voiceinput/{}",
+                env!("CARGO_PKG_VERSION")
+            )));
+
+            let body = r#"{"choices":[{"message":{"content":"OK"}}]}"#;
+            socket
+                .write_all(
+                    format!(
+                        "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                        body.len(),
+                        body
+                    )
+                    .as_bytes(),
+                )
+                .await
+                .expect("test response should be written");
+        });
+
+        let result = generate_openai_text(
+            OpenAiConfig {
+                provider: "custom".to_string(),
+                api_key: "test-key".to_string(),
+                api_url: format!("http://{address}/chat/completions"),
+                model_name: "test-model".to_string(),
+            },
+            "prompt",
+            "system",
+            None,
+        )
+        .await
+        .expect("test AI response should parse");
+        server.await.expect("test server should finish");
+        assert_eq!(result, "OK");
     }
 }
