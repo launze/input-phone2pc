@@ -74,6 +74,12 @@ config.json
 .runtime/
 release-artifacts/
 
+# Local build outputs and reference source copies
+/artifacts/
+/voice-input-desktop/src-tauri/resources/desktop-reader/
+/voice-input-server/updates/stable/*/
+/docs/hemera-new-source-*
+
 # AI config files
 CLAUDE.md
 
