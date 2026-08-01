@@ -58,6 +58,7 @@ import {
     applyAiToolEvent,
     collectAiReferences as collectAiReferencesModel,
     renderAiExportedFileItems,
+    renderAiMessageItem,
     renderAiReferenceItems,
     renderAiToolCallItem
 } from './ai-assistant.js';
@@ -383,6 +384,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     let aiMessages = [];
     let aiToolCalls = [];
     let aiExportedFiles = [];
+    let editingAiMessageId = null;
     let selectedAiSkillId = null;
     let currentAiSessionId = null;
     let activeWorkspaceTab = 'history';
@@ -875,6 +877,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     async function loadAiSessionDetail(sessionId) {
         if (!sessionId) return;
+        editingAiMessageId = null;
         try {
             currentAiSessionId = sessionId;
             const [messages, toolCalls, exportedFiles] = await Promise.all([
@@ -919,18 +922,21 @@ document.addEventListener('DOMContentLoaded', async () => {
                 created_at: Date.now()
             });
         }
+        if (editingAiMessageId && !messages.some(message => message.id === editingAiMessageId)) {
+            editingAiMessageId = null;
+        }
         if (!messages.length) {
             aiChatMessages.innerHTML = aiAssistantPlaceholder('chat');
             aiChatShouldAutoScroll = true;
             scrollAiChatToBottom();
             return;
         }
-        aiChatMessages.innerHTML = messages.map(message => `
-            <div class="ai-message ${escapeHtml(message.role)}">
-                <div class="ai-message-role">${message.role === 'user' ? '用户' : '助手'}</div>
-                <div class="ai-message-content">${markdownToHtml(message.content || '')}</div>
-            </div>
-        `).join('');
+        aiChatMessages.innerHTML = messages
+            .map(message => renderAiMessageItem({
+                ...message,
+                editing: message.id === editingAiMessageId && !message.streaming
+            }, markdownToHtml))
+            .join('');
         if (aiChatShouldAutoScroll) {
             scrollAiChatToBottom();
         } else {
@@ -940,6 +946,43 @@ document.addEventListener('DOMContentLoaded', async () => {
                 aiChatIgnoreScrollEvent = false;
             });
         }
+    }
+
+    function findAiMessageElement(messageId) {
+        return Array.from(aiChatMessages?.querySelectorAll('.ai-message') || [])
+            .find(element => element.dataset.messageId === messageId) || null;
+    }
+
+    function resizeAiMessageEditor(textarea) {
+        if (!textarea) return;
+        const minHeight = 96;
+        const maxHeight = Math.max(minHeight, Math.floor(window.innerHeight * 0.62));
+        textarea.style.height = 'auto';
+        const height = Math.min(Math.max(textarea.scrollHeight, minHeight), maxHeight);
+        textarea.style.height = `${height}px`;
+        textarea.style.overflowY = textarea.scrollHeight > maxHeight ? 'auto' : 'hidden';
+    }
+
+    function focusAiMessageEditor(messageId) {
+        const article = findAiMessageElement(messageId);
+        const textarea = article?.querySelector('.ai-message-editor');
+        if (!textarea) return;
+        resizeAiMessageEditor(textarea);
+        textarea.focus();
+        textarea.setSelectionRange(textarea.value.length, textarea.value.length);
+    }
+
+    function startAiMessageEdit(messageId) {
+        const message = aiMessages.find(item => item.id === messageId);
+        if (!message || message.streaming) return;
+        editingAiMessageId = messageId;
+        renderAiMessages();
+        requestAnimationFrame(() => focusAiMessageEditor(messageId));
+    }
+
+    function cancelAiMessageEdit() {
+        editingAiMessageId = null;
+        renderAiMessages();
     }
 
     function renderAiToolCalls() {
@@ -1002,6 +1045,96 @@ document.addEventListener('DOMContentLoaded', async () => {
                 console.error('插入引用失败:', error);
                 const message = typeof error === 'string' ? error : error?.message || '插入引用失败';
                 setAiSessionStatus(message, 'error');
+            }
+        }
+    }
+
+    async function handleAiMessageEditAction(action, messageId) {
+        const message = aiMessages.find(item => item.id === messageId);
+        if (!message || message.streaming || editingAiMessageId !== messageId) return;
+
+        if (action === 'cancel') {
+            cancelAiMessageEdit();
+            return;
+        }
+
+        if (action !== 'save') return;
+        const article = findAiMessageElement(messageId);
+        const textarea = article?.querySelector('.ai-message-editor');
+        const content = textarea?.value ?? '';
+        if (!content.trim()) {
+            setAiSessionStatus('消息内容不能为空。', 'error');
+            textarea?.focus();
+            return;
+        }
+
+        const saveButton = article?.querySelector('[data-ai-message-edit-action="save"]');
+        const cancelButton = article?.querySelector('[data-ai-message-edit-action="cancel"]');
+        if (saveButton) saveButton.disabled = true;
+        if (cancelButton) cancelButton.disabled = true;
+        try {
+            const updated = await invoke('update_ai_message', {
+                messageId,
+                content
+            });
+            aiMessages = aiMessages.map(item => item.id === messageId ? updated : item);
+            editingAiMessageId = null;
+            renderAiMessages();
+            const lastAssistant = [...aiMessages].reverse().find(item => item.role === 'assistant');
+            setAiReportContent(lastAssistant?.content || '', { resetAutoScroll: false });
+            setAiSessionStatus('消息已更新。', 'success');
+        } catch (error) {
+            console.error('编辑 AI 消息失败:', error);
+            if (saveButton) saveButton.disabled = false;
+            if (cancelButton) cancelButton.disabled = false;
+            const text = typeof error === 'string' ? error : error?.message || '编辑消息失败';
+            setAiSessionStatus(text, 'error');
+            textarea?.focus();
+        }
+    }
+
+    async function handleAiMessageAction(action, messageId, button = null) {
+        const message = aiMessages.find(item => item.id === messageId);
+        if (!message || message.streaming) return;
+
+        if (action === 'copy') {
+            try {
+                await invoke('copy_text_to_clipboard', { content: message.content || '' });
+                if (button) {
+                    button.textContent = '✔';
+                    button.title = '已复制';
+                    button.setAttribute('aria-label', '已复制');
+                    button.classList.add('copied');
+                }
+                setAiSessionStatus('消息已复制。', 'success');
+            } catch (error) {
+                console.error('复制 AI 消息失败:', error);
+                const text = typeof error === 'string' ? error : error?.message || '复制消息失败';
+                setAiSessionStatus(text, 'error');
+            }
+            return;
+        }
+
+        if (action === 'edit') {
+            startAiMessageEdit(messageId);
+            return;
+        }
+
+        if (action === 'delete') {
+            const confirmed = await confirmDialog({
+                title: '删除 AI 消息',
+                message: '确定删除这条消息吗？关联的工具调用和导出记录也会一并删除。',
+                okText: '删除'
+            });
+            if (!confirmed) return;
+            try {
+                await invoke('delete_ai_message', { messageId });
+                await loadAiSessionDetail(currentAiSessionId);
+                setAiSessionStatus('消息已删除。', 'success');
+            } catch (error) {
+                console.error('删除 AI 消息失败:', error);
+                const text = typeof error === 'string' ? error : error?.message || '删除消息失败';
+                setAiSessionStatus(text, 'error');
             }
         }
     }
@@ -1155,6 +1288,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     function resetAiConversationDraft() {
         currentAiSessionId = null;
         aiMessages = [];
+        editingAiMessageId = null;
         aiToolCalls = [];
         aiExportedFiles = [];
         aiChatShouldAutoScroll = true;
@@ -2728,6 +2862,41 @@ document.addEventListener('DOMContentLoaded', async () => {
     aiChatMessages?.addEventListener('scroll', () => {
         if (aiChatIgnoreScrollEvent) return;
         aiChatShouldAutoScroll = isAiChatNearBottom();
+    });
+
+    aiChatMessages?.addEventListener('input', event => {
+        const textarea = event.target.closest('.ai-message-editor');
+        if (textarea) resizeAiMessageEditor(textarea);
+    });
+
+    aiChatMessages?.addEventListener('keydown', async event => {
+        const textarea = event.target.closest('.ai-message-editor');
+        if (!textarea) return;
+        if (event.key === 'Escape') {
+            event.preventDefault();
+            cancelAiMessageEdit();
+            return;
+        }
+        if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) {
+            event.preventDefault();
+            await handleAiMessageEditAction('save', textarea.dataset.messageId);
+        }
+    });
+
+    aiChatMessages?.addEventListener('click', async (event) => {
+        const editButton = event.target.closest('[data-ai-message-edit-action]');
+        if (editButton) {
+            event.stopPropagation();
+            await handleAiMessageEditAction(
+                editButton.dataset.aiMessageEditAction,
+                editButton.dataset.messageId
+            );
+            return;
+        }
+        const button = event.target.closest('[data-ai-message-action]');
+        if (!button) return;
+        event.stopPropagation();
+        await handleAiMessageAction(button.dataset.aiMessageAction, button.dataset.messageId, button);
     });
 
     inputModeButtons.forEach(button => {

@@ -10,6 +10,7 @@ import {
     collectAiReferences,
     parseAiMetadata,
     renderAiExportedFileItems,
+    renderAiMessageItem,
     renderAiReferenceItems,
     renderAiToolCallItem
 } from './ai-assistant.js';
@@ -206,6 +207,31 @@ test('AI reference and exported file renderers escape content and keep actions',
     assert.match(fileHtml, /&lt;answer&gt;\.docx/);
     assert.match(fileHtml, /data-ai-export-action="open"/);
     assert.match(fileHtml, /data-ai-export-action="folder"/);
+});
+
+test('AI message renderer adds actions for saved messages and omits them while streaming', () => {
+    const html = renderAiMessageItem({ id: 'message-1', role: 'assistant', content: 'answer' }, value => '<p>' + value + '</p>');
+    assert.match(html, /data-ai-message-action="copy"[^>]*>⧉<\/button>/);
+    assert.match(html, /data-ai-message-action="edit"/);
+    assert.match(html, /data-ai-message-action="delete"/);
+    assert.match(html, /data-message-id="message-1"/);
+
+    const streamingHtml = renderAiMessageItem({ id: 'streaming', role: 'assistant', content: 'working', streaming: true });
+    assert.doesNotMatch(streamingHtml, /data-ai-message-action=/);
+});
+
+test('AI message renderer uses an inline multiline editor while editing', () => {
+    const html = renderAiMessageItem({
+        id: 'message-2',
+        role: 'assistant',
+        content: 'line 1\nline 2',
+        editing: true
+    });
+    assert.match(html, /class="ai-message-editor"/);
+    assert.match(html, /data-ai-message-edit-action="cancel"/);
+    assert.match(html, /data-ai-message-edit-action="save"/);
+    assert.doesNotMatch(html, /data-ai-message-action=/);
+    assert.match(html, /line 1\nline 2/);
 });
 
 test('AI assistant visible empty states keep assistant wording instead of legacy report wording', () => {

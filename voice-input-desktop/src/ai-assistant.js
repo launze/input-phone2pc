@@ -20,6 +20,36 @@ export function aiAssistantPlaceholder(key) {
     return `<div class="ai-report-placeholder">${escapeHtml(text)}</div>`;
 }
 
+export function renderAiMessageItem(message = {}, renderContent = value => escapeHtml(value)) {
+    const role = message.role === 'user' ? 'user' : 'assistant';
+    const isStreaming = Boolean(message.streaming);
+    const isEditing = Boolean(message.editing);
+    const messageId = escapeHtml(message.id || '');
+    const content = isEditing
+        ? `
+            <textarea class="ai-message-editor" data-message-id="${messageId}" aria-label="编辑消息内容">${escapeHtml(message.content || '')}</textarea>
+            <div class="ai-message-edit-actions">
+                <button class="ai-message-edit-button secondary" type="button" data-ai-message-edit-action="cancel" data-message-id="${messageId}">取消</button>
+                <button class="ai-message-edit-button primary" type="button" data-ai-message-edit-action="save" data-message-id="${messageId}">保存</button>
+            </div>`
+        : renderContent(message.content || '');
+    const actions = !isStreaming && !isEditing && message.id
+        ? `
+            <div class="ai-message-actions">
+                <button class="ai-message-action" type="button" data-ai-message-action="copy" data-message-id="${messageId}" title="复制消息" aria-label="复制消息">⧉</button>
+                <button class="ai-message-action" type="button" data-ai-message-action="edit" data-message-id="${messageId}" title="编辑消息" aria-label="编辑消息">✎</button>
+                <button class="ai-message-action danger" type="button" data-ai-message-action="delete" data-message-id="${messageId}" title="删除消息" aria-label="删除消息">×</button>
+            </div>`
+        : '';
+    return `
+        <article class="ai-message ${role}${isEditing ? ' editing' : ''}" data-message-id="${messageId}">
+            <div class="ai-message-role">${role === 'user' ? '用户' : '助手'}</div>
+            <div class="ai-message-content${isEditing ? ' editing' : ''}">${content}</div>
+            ${actions}
+        </article>
+    `;
+}
+
 export function applyAiToolEvent(toolCalls = [], payload = {}) {
     const event = payload.event || '';
     if (event === 'tool_call_start') {

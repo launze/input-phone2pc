@@ -1070,6 +1070,7 @@ input:checked + .slider:before {
 }
 
 .ai-message {
+    position: relative;
     max-width: 92%;
     margin-bottom: 10px;
     padding: 10px 12px;
@@ -1095,6 +1096,121 @@ input:checked + .slider:before {
     font-size: 13px;
     line-height: 1.65;
     color: #233044;
+}
+
+.ai-message.editing {
+    max-width: 96%;
+}
+
+.ai-message-content.editing {
+    width: 100%;
+}
+
+.ai-message-editor {
+    display: block;
+    width: 100%;
+    min-height: 96px;
+    max-height: 62vh;
+    box-sizing: border-box;
+    padding: 10px 12px;
+    border: 1px solid #9aa9c0;
+    border-radius: 8px;
+    outline: none;
+    background: #fff;
+    color: #233044;
+    font: inherit;
+    line-height: 1.65;
+    resize: none;
+    overflow-y: hidden;
+}
+
+.ai-message-editor:focus {
+    border-color: #4d67cb;
+    box-shadow: 0 0 0 3px rgba(77, 103, 203, 0.14);
+}
+
+.ai-message-edit-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+    margin-top: 10px;
+}
+
+.ai-message-edit-button {
+    min-width: 58px;
+    height: 30px;
+    padding: 0 12px;
+    border: 1px solid #d5ddea;
+    border-radius: 6px;
+    font-size: 12px;
+    cursor: pointer;
+}
+
+.ai-message-edit-button.secondary {
+    background: #fff;
+    color: #65738a;
+}
+
+.ai-message-edit-button.primary {
+    border-color: #4d67cb;
+    background: #4d67cb;
+    color: #fff;
+}
+
+.ai-message-edit-button:hover:not(:disabled) {
+    filter: brightness(0.97);
+}
+
+.ai-message-edit-button:disabled {
+    cursor: wait;
+    opacity: 0.55;
+}
+
+.ai-message-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 4px;
+    min-height: 24px;
+    margin-top: 5px;
+    opacity: 0.68;
+    transition: opacity 120ms ease;
+}
+
+.ai-message:hover .ai-message-actions,
+.ai-message:focus-within .ai-message-actions {
+    opacity: 1;
+}
+
+.ai-message-action {
+    width: 26px;
+    height: 24px;
+    padding: 0;
+    border: 1px solid #d5ddea;
+    border-radius: 6px;
+    background: #fff;
+    color: #65738a;
+    font-size: 15px;
+    line-height: 22px;
+    cursor: pointer;
+}
+
+.ai-message-action:hover {
+    border-color: #9aa9c0;
+    color: #263a67;
+    background: #f3f6fb;
+}
+
+.ai-message-action.copied,
+.ai-message-action.copied:hover {
+    border-color: #8bc9a0;
+    color: #21834b;
+    background: #effaf2;
+}
+
+.ai-message-action.danger:hover {
+    border-color: #e4a8a8;
+    color: #b43d3d;
+    background: #fff4f4;
 }
 
 .ai-message-content p,
