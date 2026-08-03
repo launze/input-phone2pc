@@ -1,8 +1,32 @@
 {
   "channel": "stable",
-  "latest_version": "1.2.24",
+  "latest_version": "1.2.25",
   "minimum_supported_version": "0.0.1",
   "releases": [
+    {
+      "version": "1.2.25",
+      "release_notes": "增加 AI 自由输入问答能力：普通问题可直接回答，历史记录问题会提取日期和关键词并精确查询；支持周报等 Skill 模板。AI 消息编辑改为页面内多行编辑并按内容自适应高度，复制成功显示勾选状态；更新桌面端应用图标并补充桌面快捷方式。",
+      "published_at": "2026-08-01T15:10:13+08:00",
+      "force_update": false,
+      "assets": [
+        {
+          "platform": "windows",
+          "arch": "x64",
+          "file_name": "voiceinput-desktop-windows-x64-v1.2.25-setup.exe",
+          "sha256": "c61aba482328fd2e4866fcc53ad332ee887e6eec7ecee39542b2301194bdfc6e",
+          "size": 8367584,
+          "mime_type": "application/vnd.microsoft.portable-executable"
+        },
+        {
+          "platform": "windows",
+          "arch": "x64",
+          "file_name": "voiceinput-desktop-windows-x64-v1.2.25.msi",
+          "sha256": "bab3ccc958c32763c1a3e8455b71b7db8a792e256a11dc0295524e0708c3ffa6",
+          "size": 12062720,
+          "mime_type": "application/x-msi"
+        }
+      ]
+    },
     {
       "version": "1.2.24",
       "release_notes": "修复 PC AI 助手接入阿里云百炼 Code Plan（qwen3.6-plus）时规划请求被误判为 Coding Agent 并返回 405 的问题；规划和 ReAct 请求改用非流式响应，并增强已完成 SSE 流对异常尾部的兼容，提升周报和问答稳定性。",

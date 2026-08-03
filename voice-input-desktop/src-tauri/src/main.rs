@@ -13,7 +13,7 @@ mod update;
 
 use std::sync::Arc;
 use std::{fs, path::PathBuf};
-use chrono::TimeZone;
+use chrono::{Datelike, Local, TimeZone};
 use storage::ai::{AiExportedFile, AiMessage, AiSession, AiSkill, AiToolCall};
 use storage::config::{AppConfig, OpenAiConfig};
 use storage::history::{self, HistoryPage, HistoryQuery, HistoryRecord, NewHistoryRecord};
@@ -291,6 +291,103 @@ fn parse_ai_timestamp_text(value: &str, end_of_day: bool) -> Result<i64, String>
             Ok(timestamp.timestamp_millis())
         }
         chrono::LocalResult::None => Err(format!("日期在当前时区不存在: {value}")),
+    }
+}
+
+fn local_day_bounds(year: i32, month: u32, day: u32) -> Option<(i64, i64)> {
+    let date = chrono::NaiveDate::from_ymd_opt(year, month, day)?;
+    let start = date.and_hms_milli_opt(0, 0, 0, 0)?;
+    let end = date.and_hms_milli_opt(23, 59, 59, 999)?;
+    let start = Local
+        .from_local_datetime(&start)
+        .earliest()?
+        .timestamp_millis();
+    let end = Local
+        .from_local_datetime(&end)
+        .latest()?
+        .timestamp_millis();
+    Some((start, end))
+}
+
+fn number_before(chars: &[char], end: usize) -> Option<(usize, u32)> {
+    if end == 0 {
+        return None;
+    }
+    let mut start = end;
+    while start > 0 && chars[start - 1].is_ascii_digit() {
+        start -= 1;
+    }
+    if start == end {
+        return None;
+    }
+    let value = chars[start..end]
+        .iter()
+        .collect::<String>()
+        .parse::<u32>()
+        .ok()?;
+    Some((start, value))
+}
+
+fn extract_ai_question_date_range(question: &str) -> Option<(i64, i64)> {
+    let chars = question.chars().collect::<Vec<_>>();
+    for month_index in 0..chars.len() {
+        if chars[month_index] != '月' {
+            continue;
+        }
+        let Some((_, month)) = number_before(&chars, month_index) else {
+            continue;
+        };
+        if !(1..=12).contains(&month) {
+            continue;
+        }
+        let day_start = month_index + 1;
+        let day_end = (day_start..chars.len())
+            .take_while(|index| chars[*index].is_ascii_digit())
+            .last()
+            .map(|index| index + 1);
+        let Some(day_end) = day_end else {
+            continue;
+        };
+        let Some(day) = chars[day_start..day_end]
+            .iter()
+            .collect::<String>()
+            .parse::<u32>()
+            .ok() else {
+            continue;
+        };
+        if !matches!(chars.get(day_end), Some('日' | '号')) {
+            continue;
+        }
+
+        let Some((month_start, _)) = number_before(&chars, month_index) else {
+            continue;
+        };
+        let year = if month_start > 0 && chars[month_start - 1] == '年' {
+            number_before(&chars, month_start - 1)
+                .map(|(_, value)| value as i32)
+                .unwrap_or_else(|| Local::now().year())
+        } else {
+            Local::now().year()
+        };
+        if let Some(bounds) = local_day_bounds(year, month, day) {
+            return Some(bounds);
+        }
+    }
+    None
+}
+
+fn apply_ai_question_date_scope(plan: &mut AiAssistantPlan, date_range: Option<(i64, i64)>) {
+    let Some((start_at, end_at)) = date_range else {
+        return;
+    };
+    for tool in &mut plan.tools {
+        if matches!(
+            tool.name.as_str(),
+            "search_history_records" | "search_notification_records"
+        ) {
+            tool.arguments.start_at = Some(start_at);
+            tool.arguments.end_at = Some(end_at);
+        }
     }
 }
 
@@ -1294,6 +1391,16 @@ fn add_ai_message(
 }
 
 #[tauri::command]
+fn update_ai_message(message_id: String, content: String) -> Result<AiMessage, String> {
+    storage::ai::update_message(&message_id, content).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn delete_ai_message(message_id: String) -> Result<(), String> {
+    storage::ai::delete_message(&message_id).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 fn list_ai_messages(session_id: String) -> Result<Vec<AiMessage>, String> {
     storage::ai::list_messages(&session_id).map_err(|e| e.to_string())
 }
@@ -1461,7 +1568,7 @@ async fn run_ai_assistant(
             return Err(message);
         }
     }
-    let plan = match parse_ai_assistant_plan(&plan_text, true, &skills) {
+    let plan = match parse_ai_assistant_plan(&plan_text, false, &skills) {
         Ok(value) => value,
         Err(message) => {
             emit_ai_assistant_event(
@@ -1477,7 +1584,10 @@ async fn run_ai_assistant(
             return Err(message);
         }
     };
-    let skill = match plan.skill_id.as_deref().filter(|id| !id.trim().is_empty()) {
+    let question_date_range = extract_ai_question_date_range(normalized_question);
+    let mut plan = plan;
+    apply_ai_question_date_scope(&mut plan, question_date_range);
+    let mut skill = match plan.skill_id.as_deref().filter(|id| !id.trim().is_empty()) {
         Some(id) => storage::ai::get_skill(id)
             .map_err(|e| e.to_string())?
             .ok_or_else(|| format!("AI 选择的 Skill 不存在: {id}"))?
@@ -1567,6 +1677,23 @@ async fn run_ai_assistant(
                 return Err(message);
             }
         };
+        let mut react_plan = react_plan;
+        apply_ai_question_date_scope(&mut react_plan, question_date_range);
+        if skill.is_none() {
+            if let Some(skill_id) = react_plan
+                .skill_id
+                .as_deref()
+                .filter(|id| !id.trim().is_empty())
+            {
+                let selected_skill = storage::ai::get_skill(skill_id)
+                    .map_err(|e| e.to_string())?
+                    .ok_or_else(|| format!("AI 选择的 Skill 不存在: {skill_id}"))?;
+                if !selected_skill.enabled {
+                    return Err(format!("AI 选择的 Skill 已停用: {skill_id}"));
+                }
+                skill = Some(selected_skill);
+            }
+        }
         if react_plan.final_answer_ready || react_plan.tools.is_empty() {
             break;
         }
@@ -1596,7 +1723,7 @@ async fn run_ai_assistant(
     let content = match reporting::generate_openai_text(
         config.openai,
         &prompt,
-        "你是语传 AI 助手。你只能基于工具查询到的历史输入、通知和文件记录回答；如果记录不足，要说明未在记录中体现。回答要结构清晰，适合继续追问。",
+        "你是语传 AI 助手。涉及历史输入、工作日志、通知、图片或文件时，只能引用工具查询到的记录，不能编造；没有找到相关记录时要明确说明，不能用其他日期或相近记录替代。普通知识、解释、改写、分析和闲聊问题可以直接回答。如果用户问题适合已有 Skill，应遵循该 Skill 的模板和输出格式。回答要提取相关的时间、人物、事项、进展、待办和结论，结构清晰，适合继续追问。",
         stream_handle,
     )
     .await
@@ -2427,7 +2554,7 @@ fn build_ai_assistant_plan_prompt(
         .unwrap_or_else(|| "null".to_string());
 
     format!(
-        "用户问题：\n{question}\n\n会话上下文：\n{}\n\n可用 Skills：\n{}\n\n可用工具：\n1. search_history_records(arguments): 查询历史输入、图片、文件、通知。arguments 可包含 start_at, end_at, search, content_type, via, from_device, source_app, delivery_status, favorite, pinned, tag, limit。start_at/end_at 必须是 Unix 毫秒时间戳整数；delivery_status 可为 received/manual/offline_sync，favorite/pinned 为 true/false，tag 为标签关键词。\n2. search_notification_records(arguments): 只查询通知记录。arguments 可包含 start_at, end_at, search, source_app, via, from_device, delivery_status, favorite, pinned, tag, limit。start_at/end_at 必须是 Unix 毫秒时间戳整数；favorite/pinned 为 true/false，tag 为标签关键词。\n3. list_notification_apps(arguments): 列出已有通知记录的 App。arguments 可为空。\n4. get_record_detail(arguments): 获取某条记录详情。arguments 必须包含 record_id。\n5. summarize_records(arguments): 对已查询到的记录做摘要。arguments 可包含 record_ids；为空时摘要当前工具查询结果。\n6. export_answer_word(arguments): 将本次最终答案导出 Word。arguments 可包含 title, format，format 只能是 word。\n7. save_ai_session(arguments): 显式保存当前会话。arguments 可包含 title、selected_skill、source_filters。selected_skill 必须是可用 Skills 中的 id；source_filters 必须是 JSON 对象。\n\n当前界面筛选，仅作为参考，是否采用由你决定：\n{ui_filters_text}\n如果当前界面筛选包含 record_ids，它们是 PC 可查询记录 ID；你可以逐个用 get_record_detail 查询，或在已查询记录后传给 summarize_records。\n\n请自主选择 Skill 和一个或多个工具。必须只返回严格 JSON，格式如下：\n{{\"skill_id\":\"weekly_report\",\"final_answer_ready\":false,\"tools\":[{{\"name\":\"search_history_records\",\"arguments\":{{\"start_at\":1774972800000,\"end_at\":1777564799999,\"content_type\":\"text\",\"limit\":80}}}}]}}\n如果不需要 Skill，skill_id 为 null。至少选择一个工具。不要输出 Markdown，不要输出代码块。",
+        "用户问题：\n{question}\n\n会话上下文：\n{}\n\n可用 Skills：\n{}\n\n可用工具：\n1. search_history_records(arguments): 查询历史输入、图片、文件、通知。arguments 可包含 start_at, end_at, search, content_type, via, from_device, source_app, delivery_status, favorite, pinned, tag, limit。start_at/end_at 必须是 Unix 毫秒时间戳整数；delivery_status 可为 received/manual/offline_sync，favorite/pinned 为 true/false，tag 为标签关键词。\n2. search_notification_records(arguments): 只查询通知记录。arguments 可包含 start_at, end_at, search, source_app, via, from_device, delivery_status, favorite, pinned, tag, limit。start_at/end_at 必须是 Unix 毫秒时间戳整数；favorite/pinned 为 true/false，tag 为标签关键词。\n3. list_notification_apps(arguments): 列出已有通知记录的 App。arguments 可为空。\n4. get_record_detail(arguments): 获取某条记录详情。arguments 必须包含 record_id。\n5. summarize_records(arguments): 对已查询到的记录做摘要。arguments 可包含 record_ids；为空时摘要当前工具查询结果。\n6. export_answer_word(arguments): 将本次最终答案导出 Word。arguments 可包含 title, format，format 只能是 word。\n7. save_ai_session(arguments): 显式保存当前会话。arguments 可包含 title、selected_skill、source_filters。selected_skill 必须是可用 Skills 中的 id；source_filters 必须是 JSON 对象。\n\n当前界面筛选，仅作为参考，是否采用由你决定：\n{ui_filters_text}\n如果当前界面筛选包含 record_ids，它们是 PC 可查询记录 ID；你可以逐个用 get_record_detail 查询，或在已查询记录后传给 summarize_records。\n\n规划规则：\n- 先识别用户意图和关键条件：问题类型、日期或日期范围、关键词、记录类型、来源 App、设备、标签、通知状态，以及需要提取的事实、待办、进展或风险。只有用户明确提供或问题中可靠可推断的条件才放入工具参数。\n- 涉及历史输入、工作日志、日志、通知、文件、图片、过去发生的事情、工作总结或“我之前说过什么”时，必须选择对应搜索工具；明确日期必须查询对应日期范围，不能用相邻日期代替。\n- 普通常识、解释、改写、翻译、写作建议、计算和闲聊等不依赖本地记录的问题，可以直接回答，返回 final_answer_ready=true 和 tools=[]。\n- 如果问题表达的是周报、本周工作、这周做了什么、工作总结等意图，优先选择描述最匹配的 enabled Skill（通常是 weekly_report），并使用该 Skill 的 default_period、default_filters、prompt_template 和 output_format；月报、季报等同理。Skill 只填写 skill_id，不要把 Skill ID 当作工具名。\n- 只要需要查询就返回 final_answer_ready=false，并选择一个或多个工具；无需查询时返回 final_answer_ready=true。\n\n必须只返回严格 JSON，格式如下：\n{{\"skill_id\":\"weekly_report\",\"final_answer_ready\":false,\"tools\":[{{\"name\":\"search_history_records\",\"arguments\":{{\"start_at\":1774972800000,\"end_at\":1777564799999,\"content_type\":\"text\",\"limit\":80}}}}]}}\n普通问题示例：{{\"skill_id\":null,\"final_answer_ready\":true,\"tools\":[]}}\n如果不需要 Skill，skill_id 为 null。不要输出 Markdown，不要输出代码块。",
         if conversation_text.is_empty() {
             "暂无上文。".to_string()
         } else {
@@ -2489,7 +2616,7 @@ fn build_ai_assistant_react_prompt(
         .join("\n");
 
     format!(
-        "用户问题：\n{question}\n\n会话上下文：\n{}\n\n可用 Skills：\n{}\n\n已有观察结果：\n{}\n\n当前界面筛选，仅作为参考：\n{ui_filters_text}\n如果当前界面筛选包含 record_ids，它们是 PC 可查询记录 ID，可用于 get_record_detail 或 summarize_records。\n\n你需要判断是否还要继续调用工具。如果已有观察足够回答，返回 {{\"skill_id\":null,\"final_answer_ready\":true,\"tools\":[]}}。\n如果需要继续查，只能返回可执行工具 JSON，格式：{{\"skill_id\":null,\"final_answer_ready\":false,\"tools\":[{{\"name\":\"get_record_detail\",\"arguments\":{{\"record_id\":\"...\"}}}}]}}。\n可用工具同前：search_history_records、search_notification_records、list_notification_apps、get_record_detail、summarize_records、export_answer_word、save_ai_session。search 工具的 start_at/end_at 必须是 Unix 毫秒时间戳整数；save_ai_session 可保存 title、selected_skill、source_filters。不要输出 Markdown，不要解释。",
+        "用户问题：\n{question}\n\n会话上下文：\n{}\n\n可用 Skills：\n{}\n\n已有观察结果：\n{}\n\n当前界面筛选，仅作为参考：\n{ui_filters_text}\n如果当前界面筛选包含 record_ids，它们是 PC 可查询记录 ID，可用于 get_record_detail 或 summarize_records。\n\n请继续识别用户问题中的关键条件，并判断是否还要调用工具：\n- 普通知识、解释、改写、翻译、写作建议和闲聊不需要工具，返回 final_answer_ready=true、tools=[]。\n- 涉及历史记录时，只能根据观察结果决定是否补查；没有找到精确日期或关键词记录时，不要改查其他日期来凑答案。\n- 如果用户问题适合某个 Skill，保留或返回对应 skill_id，最终回答必须遵循该 Skill 的模板和输出格式。\n如果已有观察足够回答，返回 {{\"skill_id\":null,\"final_answer_ready\":true,\"tools\":[]}}。\n如果需要继续查，只能返回可执行工具 JSON，格式：{{\"skill_id\":null,\"final_answer_ready\":false,\"tools\":[{{\"name\":\"get_record_detail\",\"arguments\":{{\"record_id\":\"...\"}}}}]}}。\n可用工具同前：search_history_records、search_notification_records、list_notification_apps、get_record_detail、summarize_records、export_answer_word、save_ai_session。search 工具的 start_at/end_at 必须是 Unix 毫秒时间戳整数；save_ai_session 可保存 title、selected_skill、source_filters。不要输出 Markdown，不要解释。",
         if conversation_text.is_empty() {
             "暂无上文。".to_string()
         } else {
@@ -2522,7 +2649,7 @@ fn parse_ai_assistant_plan(
         return Err("AI 工具规划没有选择任何工具，已停止执行。".to_string());
     }
     if !require_tools && !plan.final_answer_ready && plan.tools.is_empty() {
-        return Err("AI ReAct 规划既没有准备回答，也没有选择工具，已停止执行。".to_string());
+        plan.final_answer_ready = true;
     }
     validate_ai_assistant_plan(&plan, skills)?;
     Ok(plan)
@@ -2684,7 +2811,7 @@ fn build_ai_assistant_prompt(
     };
 
     format!(
-        "用户问题：\n{question}\n\n会话上下文：\n{}\n\nSkill 指令：\n{skill_prompt}\n\n输出格式要求：\n{output_format}\n\n工具观察：\n{observations_text}\n\n工具摘要：\n{summaries_text}\n\n工具查询结果：共 {} 条记录。\n{}\n\n请直接回答用户问题，并在信息不足时明确说明。",
+        "用户问题：\n{question}\n\n会话上下文：\n{}\n\nSkill 指令：\n{skill_prompt}\n\n输出格式要求：\n{output_format}\n\n工具观察：\n{observations_text}\n\n工具摘要：\n{summaries_text}\n\n工具查询结果：共 {} 条记录。\n{}\n\n回答规则：涉及历史记录时，只能引用上面的查询结果；没有找到精确匹配时明确说没有找到，不得用其他日期、相近关键词或推测内容替代。没有工具记录且问题属于普通知识、解释、改写、分析或闲聊时，直接回答问题，不要声称无法回答。用户要求周报、月报等格式时，严格遵循对应 Skill 指令和输出格式。必要时提取关键事实、时间、人物、事项、进展、待办和风险。",
         if conversation_text.is_empty() {
             "暂无上文。".to_string()
         } else {
@@ -3020,6 +3147,19 @@ mod tests {
     }
 
     #[test]
+    fn ai_initial_parser_allows_direct_answer_without_tools() {
+        let plan = parse_ai_assistant_plan(
+            r#"{"skill_id":null,"final_answer_ready":false,"tools":[]}"#,
+            false,
+            &test_skills(),
+        )
+        .expect("ordinary questions may skip history tools");
+
+        assert!(plan.final_answer_ready);
+        assert!(plan.tools.is_empty());
+    }
+
+    #[test]
     fn ai_plan_parser_accepts_allowed_tool_and_enabled_skill() {
         let plan = parse_ai_assistant_plan(
             r#"{"skill_id":"weekly_report","final_answer_ready":false,"tools":[{"name":"search_notification_records","arguments":{"favorite":true,"pinned":true,"tag":"项目A"}}]}"#,
@@ -3069,6 +3209,40 @@ mod tests {
 
         assert_eq!(plan.tools[0].arguments.start_at, Some(1774972800000));
         assert_eq!(plan.tools[0].arguments.end_at, Some(1777564799999));
+    }
+
+    #[test]
+    fn ai_question_date_scope_uses_exact_local_day() {
+        let year = Local::now().year();
+        let question = format!("{}{}", 7, "\u{6708}31\u{65e5}");
+        let (start_at, end_at) =
+            extract_ai_question_date_range(&question).expect("Chinese month/day should be detected");
+        let start = Local
+            .timestamp_millis_opt(start_at)
+            .single()
+            .expect("valid local start timestamp");
+        let end = Local
+            .timestamp_millis_opt(end_at)
+            .single()
+            .expect("valid local end timestamp");
+        assert_eq!(start.format("%Y-%m-%d %H:%M:%S%.3f").to_string(), format!("{}-07-31 00:00:00.000", year));
+        assert_eq!(end.format("%Y-%m-%d %H:%M:%S%.3f").to_string(), format!("{}-07-31 23:59:59.999", year));
+
+        let mut plan = AiAssistantPlan {
+            skill_id: None,
+            final_answer_ready: false,
+            tools: vec![AiAssistantToolPlan {
+                name: "search_history_records".to_string(),
+                arguments: AiAssistantToolArguments {
+                    start_at: Some(0),
+                    end_at: Some(1),
+                    ..Default::default()
+                },
+            }],
+        };
+        apply_ai_question_date_scope(&mut plan, Some((start_at, end_at)));
+        assert_eq!(plan.tools[0].arguments.start_at, Some(start_at));
+        assert_eq!(plan.tools[0].arguments.end_at, Some(end_at));
     }
 
     #[test]
@@ -3261,6 +3435,8 @@ pub fn run() {
             rename_ai_session,
             delete_ai_session,
             add_ai_message,
+            update_ai_message,
+            delete_ai_message,
             list_ai_messages,
             list_ai_tool_calls,
             list_ai_exported_files,

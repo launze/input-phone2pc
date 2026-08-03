@@ -268,6 +268,45 @@ pub fn add_message(
     get_message(&id)?.ok_or_else(|| anyhow!("message missing after create"))
 }
 
+pub fn update_message(id: &str, content: String) -> Result<AiMessage> {
+    let content = content.trim();
+    if content.is_empty() {
+        return Err(anyhow!("message content cannot be empty"));
+    }
+    let conn = open_connection()?;
+    let existing = get_message(id)?.ok_or_else(|| anyhow!("message not found"))?;
+    let now = chrono::Utc::now().timestamp_millis();
+    conn.execute(
+        "UPDATE ai_messages SET content = ?2 WHERE id = ?1",
+        params![id, content],
+    )?;
+    touch_session(&conn, &existing.session_id, now)?;
+    get_message(id)?.ok_or_else(|| anyhow!("message missing after update"))
+}
+
+pub fn delete_message(id: &str) -> Result<()> {
+    let mut conn = open_connection()?;
+    let transaction = conn.transaction()?;
+    let session_id: String = transaction.query_row(
+        "SELECT session_id FROM ai_messages WHERE id = ?1",
+        [id],
+        |row| row.get(0),
+    ).map_err(|error| match error {
+        rusqlite::Error::QueryReturnedNoRows => anyhow!("message not found"),
+        other => anyhow!(other),
+    })?;
+    transaction.execute("DELETE FROM ai_exported_files WHERE message_id = ?1", [id])?;
+    transaction.execute("DELETE FROM ai_tool_calls WHERE message_id = ?1", [id])?;
+    transaction.execute("DELETE FROM ai_messages WHERE id = ?1", [id])?;
+    let now = chrono::Utc::now().timestamp_millis();
+    transaction.execute(
+        "UPDATE ai_sessions SET updated_at = ?2 WHERE id = ?1",
+        params![session_id, now],
+    )?;
+    transaction.commit()?;
+    Ok(())
+}
+
 pub fn list_messages(session_id: &str) -> Result<Vec<AiMessage>> {
     let conn = open_connection()?;
     let mut stmt = conn.prepare(
