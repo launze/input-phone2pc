@@ -6,31 +6,31 @@
     {
       "version": "1.2.26",
       "release_notes": "发布版本 1.2.26。",
-      "published_at": "2026-08-05T14:38:06+08:00",
+      "published_at": "2026-08-08T12:04:56+08:00",
       "force_update": false,
       "assets": [
         {
           "platform": "android",
           "arch": "universal",
           "file_name": "voiceinput-android-v1.2.26.apk",
-          "sha256": "cfc526143dbd18d719477118be952614268fd8e8ba6488cd3299e59395327235",
-          "size": 33435391,
+          "sha256": "156e2ea8e7656800b599120a513cb2aa04f9226e9d6812c21c2c23e49b2429a9",
+          "size": 35159798,
           "mime_type": "application/vnd.android.package-archive"
         },
         {
           "platform": "windows",
           "arch": "x64",
           "file_name": "voiceinput-desktop-windows-x64-v1.2.26-setup.exe",
-          "sha256": "aa0194455b3faa2fba4e0e439d7ea802917ae9192dac6734f7801bd6672cd3fa",
-          "size": 8354794,
+          "sha256": "068f45a42166e311f349cbd02a68a5fb6be0af0d18a42ab1677c848b1d1182a8",
+          "size": 8365175,
           "mime_type": "application/vnd.microsoft.portable-executable"
         },
         {
           "platform": "windows",
           "arch": "x64",
           "file_name": "voiceinput-desktop-windows-x64-v1.2.26.msi",
-          "sha256": "904e95cecf185787dbfbab18c3ec8becbed10a02e6835a4f44962fb4044c40a0",
-          "size": 12029952,
+          "sha256": "04b5d1f963baa6744a7e9d2fe5307510b9ae4665860f99c13c8d49e9f6d53c29",
+          "size": 12062720,
           "mime_type": "application/x-msi"
         }
       ]
