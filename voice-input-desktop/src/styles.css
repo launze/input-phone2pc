@@ -1931,6 +1931,31 @@ input:checked + .slider:before {
     user-select: text;
 }
 
+.history-image-link {
+    min-width: 0;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+    text-decoration: underline;
+    text-decoration-color: #aeb8df;
+    text-underline-offset: 3px;
+}
+
+.history-image-link:hover,
+.history-image-link:focus-visible {
+    color: #4458b8;
+    text-decoration-color: #667eea;
+}
+
+.history-image-link:focus-visible {
+    outline: 2px solid #aeb8df;
+    outline-offset: 3px;
+    border-radius: 3px;
+}
+
 .history-item-header {
     display: flex;
     align-items: flex-start;

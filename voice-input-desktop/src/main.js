@@ -3430,6 +3430,19 @@ document.addEventListener('DOMContentLoaded', async () => {
             return;
         }
 
+        if (action === 'open-image') {
+            try {
+                await invoke('open_history_record_image', { id: recordId });
+                setDesktopTextStatus('已打开图片。', 'success');
+            } catch (error) {
+                console.error('打开图片失败:', error);
+                const message = typeof error === 'string' ? error : error?.message || '打开图片失败';
+                setDesktopTextStatus(message, 'error');
+                showToast(message, 'error', 5200);
+            }
+            return;
+        }
+
         if (action === 'save-image') {
             try {
                 const savedPath = await invoke('save_history_image_as', { id: recordId });

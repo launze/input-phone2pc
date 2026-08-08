@@ -4,7 +4,7 @@ param(
     [string]$User = "root",
     [string]$KeyPath = ".deploy/voiceinput_deploy_key",
     [string]$RemoteAppDir = "/opt/voiceinput/server",
-    [string]$Version = "1.2.21",
+    [string]$Version = "1.2.26",
     [string]$ArtifactDir = "release-artifacts/latest"
 )
 
@@ -123,7 +123,7 @@ if ($null -eq $release) {
 }
 
 $release.published_at = (Get-Date).ToString("yyyy-MM-ddTHH:mm:sszzz")
-$release.release_notes = "修复 PC AI 助手按日期生成报告时，模型返回 YYYY-MM-DD 导致工具规划参数类型错误的问题；日期区间会按本地时区自动转换为完整的起止时间。"
+$release.release_notes = "发布版本 1.2.26。"
 
 foreach ($asset in $release.assets) {
     if ($asset.file_name -eq "voiceinput-android-v${Version}.apk") {

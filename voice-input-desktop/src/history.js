@@ -315,12 +315,18 @@ export function renderHistoryItem(record, { selectionMode = false, selectedIds =
     const imageSaveButton = record.content_type === 'image'
         ? `<button class="history-action-btn" data-action="save-image" data-record-id="${escapeHtml(record.id)}">另存为</button>`
         : '';
+    const historyContent = record.content_type === 'image'
+        ? `<button type="button" class="history-text history-image-link" data-action="open-image" data-record-id="${escapeHtml(record.id)}" title="使用系统看图程序打开">${escapeHtml(record.content)}</button>`
+        : `<div class="history-text">${escapeHtml(record.content)}</div>`;
+    const imageOpenButton = record.content_type === 'image'
+        ? `<button class="history-action-btn" data-action="open-image" data-record-id="${escapeHtml(record.id)}">打开图片</button>`
+        : '';
 
     return `
         <div class="${itemClass}" data-record-id="${escapeHtml(record.id)}">
             <div class="history-item-header">
                 ${selectionBox}
-                <div class="history-text">${escapeHtml(record.content)}</div>
+                ${historyContent}
                 <div class="history-item-actions">
                     ${favoriteButton}
                     ${pinnedButton}
@@ -329,6 +335,7 @@ export function renderHistoryItem(record, { selectionMode = false, selectedIds =
                     ${insertButton}
                     ${editButton}
                     ${fileButtons}
+                    ${imageOpenButton}
                     ${imageSaveButton}
                     ${deleteButton}
                 </div>

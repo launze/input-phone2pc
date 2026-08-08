@@ -75,6 +75,24 @@ test('renderHistoryItem escapes content and shows productivity actions', () => {
     assert.match(html, /data-action="edit"/);
 });
 
+test('renderHistoryItem makes received images directly openable', () => {
+    const html = renderHistoryItem({
+        id: 'image-record-1',
+        content: '[图片] capture.jpg',
+        content_type: 'image',
+        sent_at: 1700000000000,
+        received_at: 1700000001000,
+        from_device_name: '手机',
+        via: 'lan',
+        delivery_mode: 'live'
+    });
+
+    assert.match(html, /class="history-text history-image-link"/);
+    assert.match(html, /data-action="open-image"/);
+    assert.match(html, />打开图片<\/button>/);
+    assert.match(html, />另存为<\/button>/);
+});
+
 test('renderNotificationTimeline groups notifications by day and keeps counts', () => {
     const records = [
         { id: 'n1', received_at: Date.UTC(2026, 0, 1, 1), content: 'A' },

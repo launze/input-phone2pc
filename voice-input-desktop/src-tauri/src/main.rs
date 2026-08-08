@@ -737,6 +737,115 @@ fn open_history_record_folder(id: String) -> Result<(), String> {
     open::that(&folder).map_err(|e| format!("打开目录失败: {}", e))
 }
 
+fn history_image_extension(metadata: &serde_json::Value) -> &'static str {
+    let file_extension = metadata
+        .get("file_name")
+        .and_then(|value| value.as_str())
+        .and_then(|file_name| std::path::Path::new(file_name).extension())
+        .and_then(|extension| extension.to_str())
+        .map(str::to_ascii_lowercase);
+
+    match file_extension.as_deref() {
+        Some("jpg" | "jpeg") => "jpg",
+        Some("png") => "png",
+        Some("webp") => "webp",
+        Some("gif") => "gif",
+        Some("bmp") => "bmp",
+        Some("tif" | "tiff") => "tiff",
+        Some("ico") => "ico",
+        Some("avif") => "avif",
+        _ => match metadata
+            .get("mime_type")
+            .and_then(|value| value.as_str())
+            .unwrap_or_default()
+        {
+            "image/jpeg" => "jpg",
+            "image/webp" => "webp",
+            "image/gif" => "gif",
+            "image/bmp" => "bmp",
+            "image/tiff" => "tiff",
+            "image/x-icon" | "image/vnd.microsoft.icon" => "ico",
+            "image/avif" => "avif",
+            _ => "png",
+        },
+    }
+}
+
+fn decode_history_image(metadata: &serde_json::Value) -> Result<Vec<u8>, String> {
+    use base64::Engine;
+
+    let image_data = metadata
+        .get("data")
+        .or_else(|| metadata.get("image_data"))
+        .and_then(|value| value.as_str())
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| "图片记录没有保存图片数据".to_string())?;
+    let encoded = image_data
+        .strip_prefix("data:")
+        .and_then(|value| value.split_once(',').map(|(_, data)| data))
+        .unwrap_or(image_data);
+
+    base64::engine::general_purpose::STANDARD
+        .decode(encoded)
+        .map_err(|_| "图片数据解码失败".to_string())
+}
+
+#[tauri::command]
+fn open_history_record_image(id: String) -> Result<(), String> {
+    let record = history::get_record(&id)
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| "记录不存在".to_string())?;
+
+    if record.content_type != "image" {
+        return Err("这条记录不是图片记录".to_string());
+    }
+
+    let metadata: serde_json::Value = record
+        .metadata
+        .as_deref()
+        .ok_or_else(|| "图片记录没有元数据".to_string())?
+        .parse()
+        .map_err(|_| "图片记录元数据解析失败".to_string())?;
+
+    if let Some(saved_path) = metadata
+        .get("saved_path")
+        .and_then(|value| value.as_str())
+        .filter(|value| !value.trim().is_empty())
+    {
+        let saved_path = std::path::Path::new(saved_path);
+        if saved_path.is_file() {
+            return open::that(saved_path).map_err(|e| format!("打开图片失败: {}", e));
+        }
+    }
+
+    let image_bytes = decode_history_image(&metadata)?;
+    let cache_dir = dirs::cache_dir()
+        .unwrap_or_else(std::env::temp_dir)
+        .join("voiceinput")
+        .join("history-images");
+    fs::create_dir_all(&cache_dir).map_err(|e| format!("创建图片缓存目录失败: {}", e))?;
+
+    let safe_id = id
+        .chars()
+        .map(|character| {
+            if character.is_ascii_alphanumeric() || matches!(character, '-' | '_') {
+                character
+            } else {
+                '_'
+            }
+        })
+        .collect::<String>();
+    let file_name = format!(
+        "{}.{}",
+        if safe_id.is_empty() { "image" } else { &safe_id },
+        history_image_extension(&metadata)
+    );
+    let image_path = cache_dir.join(file_name);
+    fs::write(&image_path, image_bytes).map_err(|e| format!("写入图片缓存失败: {}", e))?;
+
+    open::that(&image_path).map_err(|e| format!("打开图片失败: {}", e))
+}
+
 #[tauri::command]
 fn open_path(path: String) -> Result<(), String> {
     let path = PathBuf::from(path.trim());
@@ -3412,6 +3521,7 @@ pub fn run() {
             copy_message_history_image_record,
             open_history_record_file,
             open_history_record_folder,
+            open_history_record_image,
             open_path,
             open_parent_folder,
             open_c2_screen_reader,

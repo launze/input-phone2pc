@@ -1,8 +1,40 @@
 {
   "channel": "stable",
-  "latest_version": "1.2.25",
+  "latest_version": "1.2.26",
   "minimum_supported_version": "0.0.1",
   "releases": [
+    {
+      "version": "1.2.26",
+      "release_notes": "发布版本 1.2.26。",
+      "published_at": "2026-08-05T14:38:06+08:00",
+      "force_update": false,
+      "assets": [
+        {
+          "platform": "android",
+          "arch": "universal",
+          "file_name": "voiceinput-android-v1.2.26.apk",
+          "sha256": "cfc526143dbd18d719477118be952614268fd8e8ba6488cd3299e59395327235",
+          "size": 33435391,
+          "mime_type": "application/vnd.android.package-archive"
+        },
+        {
+          "platform": "windows",
+          "arch": "x64",
+          "file_name": "voiceinput-desktop-windows-x64-v1.2.26-setup.exe",
+          "sha256": "aa0194455b3faa2fba4e0e439d7ea802917ae9192dac6734f7801bd6672cd3fa",
+          "size": 8354794,
+          "mime_type": "application/vnd.microsoft.portable-executable"
+        },
+        {
+          "platform": "windows",
+          "arch": "x64",
+          "file_name": "voiceinput-desktop-windows-x64-v1.2.26.msi",
+          "sha256": "904e95cecf185787dbfbab18c3ec8becbed10a02e6835a4f44962fb4044c40a0",
+          "size": 12029952,
+          "mime_type": "application/x-msi"
+        }
+      ]
+    },
     {
       "version": "1.2.25",
       "release_notes": "增加 AI 自由输入问答能力：普通问题可直接回答，历史记录问题会提取日期和关键词并精确查询；支持周报等 Skill 模板。AI 消息编辑改为页面内多行编辑并按内容自适应高度，复制成功显示勾选状态；更新桌面端应用图标并补充桌面快捷方式。",
